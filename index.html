@@ -175,6 +175,15 @@ dialog .formgrid{grid-template-columns:1fr 1fr}
 body.locked .app{grid-template-columns:1fr} body.locked .rail{display:none}
 .syncstat{font-size:.8rem; color:var(--mat-dim); padding:.25rem .6rem; min-height:1.4em}
 .syncstat[data-s="error"],.syncstat[data-s="pending"]{color:var(--tag)}
+.lines{overflow-x:auto; border:1px solid var(--line); border-radius:6px; padding:.5rem; background:var(--bg)}
+.lines table{width:100%; border-collapse:collapse; margin-bottom:.5rem}
+.lines th{font:600 .8rem/1.2 'Barlow',sans-serif; color:var(--muted); text-align:left; padding:.3rem .35rem}
+.lines td{padding:.25rem .35rem; vertical-align:middle}
+.lines .num{text-align:right; width:6.5rem} .lines td.num input[type=number]{text-align:right}
+.lines td:first-child{min-width:16rem} .lines td:last-child{width:2.5rem}
+.lines .li-a{font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink)}
+input.calc{background:var(--sunk); font-weight:600; font-variant-numeric:tabular-nums}
+#print table.items th{width:auto}
 @media (max-width:860px){
   .record{grid-template-columns:1fr}
 }

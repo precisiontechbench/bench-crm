@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 const KEY = 'ptb-bench-crm';
-const ENTS = ['customers','assets','tickets','followups'];
+const ENTS = ['customers','assets','tickets','estimates','invoices','followups'];
 const $ = (s, el=document) => el.querySelector(s);
 const $$ = (s, el=document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -11,12 +11,13 @@ const clone = o => JSON.parse(JSON.stringify(o));
 const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0,10); };
 const digits = s => String(s||'').replace(/\D/g,'').replace(/^1(?=\d{10}$)/,'');
 
-const FIELD_TYPES = {text:'Short text', textarea:'Long text', number:'Number', currency:'Money', date:'Date', select:'Dropdown', checkbox:'Checkbox', phone:'Phone', email:'Email', url:'Web link', relation:'Link to record'};
+const FIELD_TYPES = {text:'Short text', textarea:'Long text', number:'Number', currency:'Money', date:'Date', select:'Dropdown', checkbox:'Checkbox', phone:'Phone', email:'Email', url:'Web link', relation:'Link to record', lineitems:'Line items'};
 const F = (id,label,type,x={}) => ({id,label,type,...x});
 const DEFAULT_SCHEMA = {
   customers:{label:'Customers', singular:'Customer', prefix:'C', fields:[
     F('name','Name','text',{required:true,list:true,title:true,locked:true}),
     F('phone','Phone','phone',{list:true}),
+    F('phone_mobile','Phone is a cell (can text)','checkbox'),
     F('email','Email','email',{list:true}),
     F('company','Company or organization','text',{list:true}),
     F('address','Address','textarea'),
@@ -52,10 +53,43 @@ const DEFAULT_SCHEMA = {
     F('quote','Quote','currency'),
     F('total','Final total','currency'),
     F('paid','Paid','checkbox')]},
+  estimates:{label:'Estimates', singular:'Estimate', prefix:'EST', fields:[
+    F('title','Description','text',{list:true,title:true}),
+    F('customer','Customer','relation',{target:'customers',required:true,list:true,locked:true}),
+    F('ticket','Ticket','relation',{target:'tickets',list:true,locked:true}),
+    F('status','Status','select',{list:true,locked:true,default:'Draft',options:['Draft','Sent','Approved','Declined','Expired','Converted']}),
+    F('date','Date','date',{list:true,default:'today'}),
+    F('valid_until','Valid until','date'),
+    F('items','Line items','lineitems',{locked:true}),
+    F('tax_rate','Tax rate (%)','number',{default:'6',hint:'Kentucky sales tax is 6%. Untick Tax on any line that is not taxable.'}),
+    F('subtotal','Subtotal','currency',{calc:true,locked:true}),
+    F('tax','Tax','currency',{calc:true,locked:true}),
+    F('total','Total','currency',{calc:true,locked:true,list:true}),
+    F('notes','Notes for the customer','textarea')]},
+  invoices:{label:'Invoices', singular:'Invoice', prefix:'INV', fields:[
+    F('title','Description','text',{list:true,title:true}),
+    F('customer','Customer','relation',{target:'customers',required:true,list:true,locked:true}),
+    F('ticket','Ticket','relation',{target:'tickets',list:true,locked:true}),
+    F('estimate','From estimate','relation',{target:'estimates',locked:true}),
+    F('status','Status','select',{list:true,locked:true,default:'Draft',options:['Draft','Sent','Paid','Closed','Void']}),
+    F('date_issued','Date issued','date',{list:true,default:'today'}),
+    F('service_date','Service date','date',{locked:true,default:'today',hint:'Automatic follow-ups are scheduled from this date.'}),
+    F('due','Payment due','date'),
+    F('items','Line items','lineitems',{locked:true}),
+    F('tax_rate','Tax rate (%)','number',{default:'6',hint:'Kentucky sales tax is 6%. Untick Tax on any line that is not taxable.'}),
+    F('subtotal','Subtotal','currency',{calc:true,locked:true}),
+    F('tax','Tax','currency',{calc:true,locked:true}),
+    F('total','Total','currency',{calc:true,locked:true,list:true}),
+    F('amount_paid','Amount paid','currency',{hint:'Filled in automatically when you mark the invoice Paid.'}),
+    F('balance','Balance due','currency',{calc:true,locked:true,list:true}),
+    F('payment_method','Payment method','select',{options:['Cash','Card','Check','Zelle','Venmo','Other']}),
+    F('paid_date','Date paid','date'),
+    F('notes','Notes for the customer','textarea')]},
   followups:{label:'Follow-ups', singular:'Follow-up', prefix:'F', fields:[
     F('subject','Subject','text',{required:true,list:true,title:true}),
     F('customer','Customer','relation',{target:'customers',list:true,locked:true}),
     F('ticket','Ticket','relation',{target:'tickets',list:true,locked:true}),
+    F('invoice','Invoice','relation',{target:'invoices',locked:true}),
     F('method','Method','select',{list:true,options:['Call','Text','Email','Visit']}),
     F('due','Due','date',{list:true,locked:true,default:'today'}),
     F('status','Status','select',{list:true,locked:true,default:'Pending',options:['Pending','Left message','No answer','Done']}),
@@ -67,6 +101,8 @@ const ICON = {
   assets:'<rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M9.5 7h5M9.5 10.5h5M12 17h0"/>',
   tickets:'<path d="M3 12l5.5-6.5H21v13H8.5z"/><circle cx="9" cy="12" r="1.4"/>',
   followups:'<rect x="3.5" y="5" width="17" height="15.5" rx="1.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  estimates:'<rect x="5" y="4" width="14" height="17" rx="1.5"/><path d="M9 4V2.5h6V4M8.5 10h7M8.5 14h4.5"/>',
+  invoices:'<path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
   settings:'<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>'
 };
 const icon = k => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[k]||''}</svg>`;
@@ -74,11 +110,14 @@ const icon = k => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[
 /* ---------- storage ---------- */
 function freshDb(){
   return { v:1, schema:clone(DEFAULT_SCHEMA),
-    records:{customers:[],assets:[],tickets:[],followups:[]},
-    counters:{customers:1000,assets:1000,tickets:1000,followups:1000},
+    records:{customers:[],assets:[],tickets:[],estimates:[],invoices:[],followups:[]},
+    counters:{customers:1000,assets:1000,tickets:1000,estimates:1000,invoices:1000,followups:1000},
+    meta:{updated:0, configUpdated:0, mig:['phone_mobile','fu_invoice']},
     settings:{ shopName:'Precision Tech Bench', shopLine:'439 Main Street, Carrollton, KY 41008',
       terms:'Please back up your data. We are not responsible for data loss during repair. Devices not picked up within 30 days of notice may be recycled.',
-      closed:['Closed'], done:['Done'], leadsUrl:'', leadsKey:'', imported:[], lastSync:'', lastBackup:'', autoLock:30 } };
+      closed:['Closed'], done:['Done'], estDone:['Declined','Expired','Converted'], invDone:['Paid','Closed','Void'],
+      followTrigger:['Paid','Closed'], fuEnabled:true, fuDays:14, fuMonths:2, invoiceNote:'Thank you for choosing Precision Tech Bench!',
+      leadsUrl:'', leadsKey:'', imported:[], lastSync:'', lastBackup:'', autoLock:30 } };
 }
 let db = null;
 
@@ -98,18 +137,40 @@ function fmt(f, v, depth=0){
     case 'relation': { const r = find(f.target, v); return r ? label(f.target, r, depth+1) : '(removed)'; }
     case 'checkbox': return 'Yes';
     case 'currency': return '$' + Number(v).toFixed(2);
+    case 'lineitems': return Array.isArray(v) ? v.map(l => l.d).filter(Boolean).join('; ') : '';
     case 'date': { const [y,m,d] = String(v).split('-'); return y&&m&&d ? `${+m}/${+d}/${y}` : String(v); }
     case 'phone': { const x = digits(v); return x.length===10 ? `(${x.slice(0,3)}) ${x.slice(3,6)}-${x.slice(6)}` : String(v); }
     default: return String(v);
   }
 }
-const isClosed = (ent,r) => ent==='tickets' ? db.settings.closed.includes(r.data.status)
-                         : ent==='followups' ? db.settings.done.includes(r.data.status) : false;
-const STATUS_COLORS = {'New':'var(--focus)','Diagnosing':'var(--warn)','Waiting on parts':'var(--warn)','Waiting on customer':'var(--warn)','In progress':'var(--mat-dim)','Ready for pickup':'var(--ok)','Closed':'var(--muted)','Pending':'var(--warn)','Done':'var(--ok)','Urgent':'var(--danger)','High':'var(--warn)'};
+const DONE_KEY = {tickets:'closed', followups:'done', estimates:'estDone', invoices:'invDone'};
+const isClosed = (ent,r) => DONE_KEY[ent] ? (db.settings[DONE_KEY[ent]] || []).includes(r.data.status) : false;
+const round2 = n => Math.round((+n || 0) * 100) / 100;
+function shiftDate(iso, {days=0, months=0}){
+  const [y,m,d] = String(iso).split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1 + months, 1));
+  const last = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0)).getUTCDate();
+  dt.setUTCDate(Math.min(d, last) + days);
+  return dt.toISOString().slice(0,10);
+}
+function computeTotals(ent, data){
+  const li = sch(ent).fields.find(f => f.type === 'lineitems'); if (!li) return data;
+  const items = Array.isArray(data[li.id]) ? data[li.id] : [];
+  const sub = round2(items.reduce((a,l) => a + (+l.q||0) * (+l.p||0), 0));
+  const taxable = round2(items.filter(l => l.t !== false).reduce((a,l) => a + (+l.q||0) * (+l.p||0), 0));
+  const tax = round2(taxable * (+data.tax_rate || 0) / 100), total = round2(sub + tax);
+  const put = (k,v) => { if (fld(ent,k)) data[k] = v; };
+  put('subtotal', sub); put('tax', tax); put('total', total);
+  put('balance', round2(total - (+data.amount_paid || 0)));
+  return data;
+}
+const STATUS_COLORS = {'New':'var(--focus)','Diagnosing':'var(--warn)','Waiting on parts':'var(--warn)','Waiting on customer':'var(--warn)','In progress':'var(--mat-dim)','Ready for pickup':'var(--ok)','Closed':'var(--muted)','Pending':'var(--warn)','Done':'var(--ok)','Draft':'var(--muted)','Sent':'var(--focus)','Paid':'var(--ok)','Approved':'var(--ok)','Declined':'var(--danger)','Void':'var(--muted)','Converted':'var(--mat-dim)','Urgent':'var(--danger)','High':'var(--warn)'};
 const pill = v => v ? `<span class="pill" style="--pc:${STATUS_COLORS[v]||'var(--muted)'}">${h(v)}</span>` : '';
 function cell(ent, f, r){
   const v = r.data[f.id];
   if (f.type==='select' && (f.id==='status' || f.id==='priority')) return pill(v);
+  if (ent==='customers' && f.id==='phone' && v && r.data.phone_mobile) return h(fmt(f, v)) + ' <span class="meta">cell</span>';
+  if (f.id==='balance' && +v > 0 && !isClosed(ent, r)) return `<b style="color:var(--danger)">${h(fmt(f, v))}</b>`;
   return h(fmt(f, v));
 }
 function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove('on'), 2600); }
@@ -173,6 +234,12 @@ function ensureShape(d){
   const f = freshDb();
   for (const k of ['schema','records','counters','settings']) d[k] = {...f[k], ...(d[k]||{})};
   d.deleted = d.deleted || {}; d.meta = d.meta || {updated:0, configUpdated:0};
+  d.meta.mig = d.meta.mig || [];
+  const once = (key, fn) => { if (!d.meta.mig.includes(key)) { fn(); d.meta.mig.push(key); } };
+  const addAfter = (ent, afterId, field) => { const fs = d.schema[ent]?.fields; if (!fs || fs.some(x => x.id === field.id)) return;
+    const i = fs.findIndex(x => x.id === afterId); fs.splice(i < 0 ? fs.length : i + 1, 0, clone(field)); };
+  once('phone_mobile', () => addAfter('customers', 'phone', DEFAULT_SCHEMA.customers.fields.find(x => x.id === 'phone_mobile')));
+  once('fu_invoice', () => addAfter('followups', 'ticket', DEFAULT_SCHEMA.followups.fields.find(x => x.id === 'invoice')));
   return d;
 }
 
@@ -412,7 +479,7 @@ function renderRail(active){
   const items = [['bench','#/','Bench'], ...ENTS.map(e => [e, '#/list/'+e, sch(e).label]), ['settings','#/settings','Settings']];
   $('#rail').innerHTML = `<div class="brand"><b>Bench CRM</b><span>${h(db.settings.shopName)}</span></div>` +
     items.map(([k,href,lab]) => `<a href="${href}" ${k===active?'aria-current="page"':''}>${icon(k)}<span>${h(lab)}</span></a>`).join('') +
-    `<div class="spacer"></div><div class="syncstat" id="syncstat" aria-live="polite"></div><div class="keys"><kbd>N</kbd>new<br><kbd>/</kbd>search<br><kbd>Ctrl</kbd><kbd>S</kbd>save<br><kbd>Alt</kbd><kbd>1</kbd>–<kbd>6</kbd>sections</div><button data-act="lock">Lock</button>`;
+    `<div class="spacer"></div><div class="syncstat" id="syncstat" aria-live="polite"></div><div class="keys"><kbd>N</kbd>new<br><kbd>/</kbd>search<br><kbd>Ctrl</kbd><kbd>S</kbd>save<br><kbd>Alt</kbd><kbd>1</kbd>–<kbd>8</kbd>sections</div><button data-act="lock">Lock</button>`;
   setSync(syncState.s, syncState.msg);
 }
 function parseHash(){
@@ -453,11 +520,14 @@ function viewBench(){
   const dueSoon = fus.filter(r => !r.data.due || r.data.due <= t);
   const later = fus.length - dueSoon.length;
   const readyCount = open.filter(r => r.data.status === 'Ready for pickup').length;
+  const unpaid = db.records.invoices.filter(r => !isClosed('invoices', r) && +r.data.balance > 0);
+  const owed = round2(unpaid.reduce((a,r) => a + (+r.data.balance||0), 0));
+  const openEst = db.records.estimates.filter(r => !isClosed('estimates', r)).length;
   return `<div class="head"><div><h1>On the bench</h1><p>${new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</p></div>
     <div class="row">${db.settings.leadsUrl ? '<button class="btn" data-act="sync">Sync web leads</button>' : ''}
     <a class="btn" href="#/new/customers">New customer</a><a class="btn primary" href="#/new/tickets">New ticket</a></div></div>
     ${legacyData() ? `<div class="banner" role="status"><span>This browser still has records from the earlier, unsecured version of Bench CRM. Move them into your encrypted GitHub storage?</span><span class="row"><button class="btn primary small" data-act="legacy-import">Move records</button><button class="btn small" data-act="legacy-drop">Discard them</button></span></div>` : ''}
-    <div class="stats"><div><b>${open.length}</b>open tickets</div><div><b>${readyCount}</b>ready for pickup</div><div><b>${dueSoon.length}</b>follow-ups due</div><div><b>${db.records.customers.length}</b>customers</div></div>
+    <div class="stats"><div><b>${open.length}</b>open tickets</div><div><b>${readyCount}</b>ready for pickup</div><div><b>${dueSoon.length}</b>follow-ups due</div><div><a href="#/list/invoices" style="text-decoration:none"><b>${fmt({type:'currency'}, owed) || '$0.00'}</b>unpaid on ${unpaid.length} invoice${unpaid.length===1?'':'s'}</a></div><div><a href="#/list/estimates" style="text-decoration:none"><b>${openEst}</b>open estimates</a></div></div>
     ${open.length ? `<div class="lanes">${lanes.map(s => laneHtml(s, open.filter(r => r.data.status===s))).join('')}${unset.length ? laneHtml('No status', unset) : ''}</div>`
       : `<div class="panel empty" style="margin-bottom:2rem">The bench is clear. Check in a device to start a ticket.<br><a class="btn primary" href="#/new/tickets">New ticket</a></div>`}
     <div class="head" style="margin-bottom:.6rem"><h2>Follow-ups due</h2><a class="btn small" href="#/list/followups">All follow-ups${later ? ` (${later} later)` : ''}</a></div>
@@ -479,7 +549,7 @@ function viewList(ent){
     <div class="row"><a class="btn small" href="#/fields/${ent}">Edit fields</a><a class="btn primary" href="#/new/${ent}">New ${h(sc.singular.toLowerCase())}</a></div></div>
     <div class="toolbar"><input type="search" placeholder="Search ${h(sc.label.toLowerCase())}" aria-label="Search" data-in="search" data-ent="${ent}" value="${h(ui.q[ent]||'')}">
     ${sf ? `<select data-in="filter" data-ent="${ent}" aria-label="Filter by status"><option value="">All statuses</option>
-      ${(ent==='tickets'||ent==='followups') ? `<option value="__open" ${fv==='__open'?'selected':''}>Open only</option>` : ''}
+      ${DONE_KEY[ent] ? `<option value="__open" ${fv==='__open'?'selected':''}>Open only</option>` : ''}
       ${sf.options.map(o => `<option ${fv===o?'selected':''}>${h(o)}</option>`).join('')}</select>` : ''}</div>
     <div class="tablewrap"><table class="grid"><thead><tr>
       <th data-act="sort" data-ent="${ent}" data-k="no" ${s.k==='no' ? `aria-sort="${s.dir>0?'ascending':'descending'}"` : ''}>No.</th>
@@ -518,8 +588,25 @@ function relOptions(f, cur, cons=[]){
   return `<option value="">Choose ${h(sch(f.target).singular.toLowerCase())}</option>` +
     recs.map(r => `<option value="${r.id}" ${r.id===cur?'selected':''}>${h(label(f.target,r))} (${h(tagOf(f.target,r))})</option>`).join('');
 }
+const lineRow = l => `<tr><td><input class="li-d" value="${h(l.d||'')}" placeholder="Labor, part, or service" aria-label="Description"></td>
+  <td class="num"><input class="li-q" type="number" step="any" value="${h(l.q ?? 1)}" aria-label="Quantity"></td>
+  <td class="num"><input class="li-p" type="number" step="0.01" value="${h(l.p ?? '')}" aria-label="Price"></td>
+  <td class="num"><input class="li-t" type="checkbox" ${l.t === false ? '' : 'checked'} aria-label="Taxable"></td>
+  <td class="num li-a">${fmt({type:'currency'}, round2((+l.q||0)*(+l.p||0))) || '$0.00'}</td>
+  <td><button type="button" class="btn small danger" data-act="line-del" aria-label="Remove line">✕</button></td></tr>`;
+function readLines(form, id){
+  return $$(`[data-lines="${id}"] tbody tr`, form).map(tr => ({ d:$('.li-d',tr).value.trim(), q:+$('.li-q',tr).value || 0, p:+$('.li-p',tr).value || 0, t:$('.li-t',tr).checked }))
+    .filter(l => l.d || l.p);
+}
+function recalc(form){
+  const ent = form.dataset.ent; const li = sch(ent).fields.find(f => f.type === 'lineitems'); if (!li) return;
+  $$(`[data-lines="${li.id}"] tbody tr`, form).forEach(tr => { $('.li-a',tr).textContent = fmt({type:'currency'}, round2((+$('.li-q',tr).value||0) * (+$('.li-p',tr).value||0))) || '$0.00'; });
+  const d = { [li.id]: readLines(form, li.id), tax_rate: form.elements.f_tax_rate?.value, amount_paid: form.elements.f_amount_paid?.value };
+  computeTotals(ent, d);
+  for (const k of ['subtotal','tax','total','balance']) { const el = form.elements['f_'+k]; if (el && d[k] !== undefined) el.value = d[k].toFixed(2); }
+}
 function inputFor(f, v){
-  const n = `name="f_${f.id}" id="f_${f.id}"`, req = f.required ? 'required' : '';
+  const n = `name="f_${f.id}" id="f_${f.id}"` + (f.calc ? ' readonly tabindex="-1" class="calc"' : ''), req = f.required ? 'required' : '';
   const val = v ?? '';
   switch (f.type){
     case 'textarea': return `<textarea ${n} ${req}>${h(val)}</textarea>`;
@@ -533,6 +620,9 @@ function inputFor(f, v){
     case 'phone': return `<input type="tel" autocomplete="tel" ${n} ${req} value="${h(val)}">`;
     case 'email': return `<input type="email" autocomplete="email" ${n} ${req} value="${h(val)}">`;
     case 'url': return `<input type="url" ${n} ${req} value="${h(val)}" placeholder="https://">`;
+    case 'lineitems': { const rows = Array.isArray(val) && val.length ? val : [{q:1, t:true}];
+      return `<div class="lines" data-lines="${f.id}"><table><thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Tax</th><th class="num">Amount</th><th></th></tr></thead>
+        <tbody>${rows.map(lineRow).join('')}</tbody></table><button type="button" class="btn small" data-act="line-add">Add line</button></div>`; }
     default: return `<input type="text" ${n} ${req} value="${h(val)}">`;
   }
 }
@@ -557,6 +647,7 @@ function viewRecord(ent, id, prefill={}){
     for (const [k,v] of Object.entries(prefill)) if (fld(ent,k)) data[k] = v; expandPrefill(ent, data); }
   const fieldsHtml = sc.fields.map(f => {
     if (f.type === 'checkbox') return `<label class="f chk">${inputFor(f, data[f.id])}${h(f.label)}</label>`;
+    if (f.type === 'lineitems') return `<div class="f wide"><span>${h(f.label)}</span>${inputFor(f, data[f.id])}</div>`;
     return `<label class="f ${f.type==='textarea'?'wide':''}" for="f_${f.id}"><span>${h(f.label)}${f.required?' <span class="req" aria-label="required">*</span>':''}</span>
       ${inputFor(f, data[f.id])}${f.hint ? `<small>${h(f.hint)}</small>` : ''}</label>`;
   }).join('');
@@ -575,7 +666,9 @@ function viewRecord(ent, id, prefill={}){
   }
   return `<div class="head"><div class="row" style="gap:.9rem">${r ? `<span class="tag big">${h(tagOf(ent,r))}</span>` : ''}
       <div><h1>${r ? h(label(ent,r)) : 'New ' + h(sc.singular.toLowerCase())}</h1><p><a href="#/list/${ent}">${h(sc.label)}</a></p></div></div>
-      ${r && ent==='tickets' ? `<button class="btn" data-act="print" data-id="${r.id}">Print work order</button>` : ''}</div>
+      <div class="row">${r && ent==='estimates' ? `<button class="btn" data-act="est-to-inv" data-id="${r.id}">Create invoice from this</button>` : ''}
+      ${r && ent==='tickets' ? `<button class="btn" data-act="print" data-id="${r.id}">Print work order</button>` : ''}
+      ${r && (ent==='invoices'||ent==='estimates') ? `<button class="btn" data-act="print-doc" data-ent="${ent}" data-id="${r.id}">Print ${h(sch(ent).singular.toLowerCase())}</button>` : ''}</div></div>
     <div class="record" ${r ? '' : 'style="grid-template-columns:1fr"'}>
       <form class="panel" id="recform" data-ent="${ent}" data-id="${r?r.id:''}" novalidate>
         <div class="formgrid">${fieldsHtml}</div>
@@ -584,7 +677,7 @@ function viewRecord(ent, id, prefill={}){
           ${r ? `<button class="btn danger" type="button" data-act="del-rec" data-ent="${ent}" data-id="${r.id}">Delete</button>` : ''}</div>
       </form>${related}</div>`;
 }
-function afterForm(){ const form = $('#recform'); if (!form) return; refilter(form); if (!form.dataset.id) form.querySelector('input,select,textarea')?.focus(); }
+function afterForm(){ const form = $('#recform'); if (!form) return; refilter(form); recalc(form); if (!form.dataset.id) form.querySelector('input,select,textarea')?.focus(); }
 function refilter(form){
   const ent = form.dataset.ent; const rels = sch(ent).fields.filter(f => f.type==='relation');
   for (const f of rels){
@@ -612,6 +705,8 @@ function saveRecord(form){
   const ent = form.dataset.ent, id = form.dataset.id, sc = sch(ent);
   const data = {};
   for (const f of sc.fields){
+    if (f.type === 'lineitems'){ const ls = readLines(form, f.id); if (ls.length) data[f.id] = ls; continue; }
+    if (f.calc) continue;
     const el = form.elements['f_'+f.id]; if (!el) continue;
     let v = f.type==='checkbox' ? el.checked : el.value.trim();
     if ((f.type==='number'||f.type==='currency') && v !== '') v = Number(v);
@@ -619,12 +714,54 @@ function saveRecord(form){
     if (f.type==='email' && v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { toast('Check the email address format.'); el.focus(); return; }
     if (v !== '' && v !== false) data[f.id] = v;
   }
+  if (ent === 'invoices' && data.status === 'Paid'){
+    computeTotals(ent, data);
+    if (fld(ent,'amount_paid') && data.amount_paid === undefined && data.total) data.amount_paid = data.total;
+    if (fld(ent,'paid_date') && !data.paid_date) data.paid_date = today();
+  }
+  computeTotals(ent, data);
   let r;
   if (id){ r = find(ent, id);
     for (const f of sc.fields){ if (f.id in data) r.data[f.id] = data[f.id]; else delete r.data[f.id]; }
     r.updated = new Date().toISOString();
   } else r = createRecord(ent, data);
-  if (save()) { toast(id ? 'Changes saved' : `${sc.singular} ${tagOf(ent,r)} created`); location.hash = `#/rec/${ent}/${r.id}`; if (id) route(); }
+  const auto = ent === 'invoices' ? scheduleInvoiceFollowups(r) : '';
+  if (save()) { toast(auto || (id ? 'Changes saved' : `${sc.singular} ${tagOf(ent,r)} created`)); location.hash = `#/rec/${ent}/${r.id}`; if (id) route(); }
+}
+function scheduleInvoiceFollowups(inv){
+  const S = db.settings;
+  if (!S.fuEnabled || inv.autoFU || !(S.followTrigger || []).includes(inv.data.status)) return '';
+  const c = find('customers', inv.data.customer); if (!c) return '';
+  const t = find('tickets', inv.data.ticket), a = t && find('assets', t.data.asset);
+  const base = inv.data.service_date || inv.data.date_issued || today();
+  const method = c.data.phone_mobile ? 'Text' : c.data.phone ? 'Call' : 'Email';
+  const days = Math.max(1, parseInt(S.fuDays,10) || 14), months = Math.max(1, parseInt(S.fuMonths,10) || 2);
+  const steps = [
+    { due: shiftDate(base, {days}), name: days % 7 === 0 ? `${days/7}-week check-in` : `${days}-day check-in` },
+    { due: shiftDate(base, {months}), name: `${months}-month check-in` }];
+  const cname = label('customers', c), what = a ? label('assets', a) : 'their device';
+  for (const s of steps){
+    const d = {};
+    setIf('followups', d, 'subject', `${s.name}: ${cname}`);
+    setIf('followups', d, 'customer', c.id); if (t) setIf('followups', d, 'ticket', t.id);
+    setIf('followups', d, 'invoice', inv.id); setIf('followups', d, 'method', method);
+    setIf('followups', d, 'due', s.due); setIf('followups', d, 'status', fld('followups','status')?.options[0]);
+    setIf('followups', d, 'notes', `Automatic after ${tagOf('invoices', inv)} (service ${fmt({type:'date'}, base)}). Ask how ${what} is running and whether they need anything else.`);
+    createRecord('followups', d);
+  }
+  inv.autoFU = new Date().toISOString();
+  return `Saved. Follow-ups set for ${steps.map(s => fmt({type:'date'}, s.due)).join(' and ')}.`;
+}
+function estimateToInvoice(id){
+  const e = find('estimates', id); if (!e) return;
+  const d = {};
+  for (const k of ['title','customer','ticket','items','tax_rate','notes']) if (e.data[k] !== undefined && fld('invoices', k)) d[k] = clone(e.data[k]);
+  setIf('invoices', d, 'estimate', e.id);
+  for (const f of sch('invoices').fields) if (d[f.id] === undefined && f.default !== undefined && f.default !== '') d[f.id] = resolveDefault(f);
+  computeTotals('invoices', d);
+  const inv = createRecord('invoices', d);
+  if (fld('estimates','status')?.options.includes('Converted')){ e.data.status = 'Converted'; e.updated = new Date().toISOString(); }
+  save(); toast(`Invoice ${tagOf('invoices', inv)} created`); location.hash = `#/rec/invoices/${inv.id}`;
 }
 
 /* ---------- field editor ---------- */
@@ -642,7 +779,7 @@ function viewFields(ent){
     <div class="head" style="margin-bottom:.6rem"><h2>${h(sc.label)} fields</h2><button class="btn primary" data-act="fld-add" data-ent="${ent}">Add field</button></div>
     <ul class="fields panel">${sc.fields.map((f,i) => `<li>
       <div class="n"><b>${h(f.label)}</b><small>${h(FIELD_TYPES[f.type]||f.type)}${f.type==='relation' ? ' to ' + h(sch(f.target)?.singular||f.target) : ''}${f.type==='select' ? ': ' + h(f.options.join(', ')) : ''}</small></div>
-      <div class="flags">${f.required?'<span>Required</span>':''}${f.list?'<span>In list</span>':''}${f.title?'<span>Record name</span>':''}${f.locked?'<span>Core</span>':''}</div>
+      <div class="flags">${f.required?'<span>Required</span>':''}${f.list?'<span>In list</span>':''}${f.title?'<span>Record name</span>':''}${f.calc?'<span>Automatic</span>':''}${f.locked?'<span>Core</span>':''}</div>
       <button class="btn small" data-act="fld-move" data-ent="${ent}" data-i="${i}" data-d="-1" ${i===0?'disabled':''} aria-label="Move ${h(f.label)} up">▲</button>
       <button class="btn small" data-act="fld-move" data-ent="${ent}" data-i="${i}" data-d="1" ${i===sc.fields.length-1?'disabled':''} aria-label="Move ${h(f.label)} down">▼</button>
       <button class="btn small" data-act="fld-edit" data-ent="${ent}" data-i="${i}">Edit</button>
@@ -698,18 +835,28 @@ function viewSettings(){
   const ts = fld('tickets','status'), fs = fld('followups','status');
   return `<div class="head"><div><h1>Settings</h1><p>Changes save to GitHub automatically.</p></div></div>
   <div class="settings">
-    <section class="panel"><h2>Shop</h2><p>Shown on printed work orders.</p>
+    <section class="panel"><h2>Shop</h2><p>Shown on printed work orders, estimates, and invoices.</p>
       <div class="formgrid">
         <label class="f">Shop name<input data-in="setting" data-k="shopName" value="${h(S.shopName)}"></label>
         <label class="f">Address line<input data-in="setting" data-k="shopLine" value="${h(S.shopLine)}"></label>
         <label class="f wide">Work order terms<textarea data-in="setting" data-k="terms">${h(S.terms)}</textarea></label>
       </div></section>
-    <section class="panel"><h2>Fields and record types</h2><p>Add, rename, reorder, or remove fields on customers, assets, tickets, and follow-ups. Change dropdown choices like ticket statuses.</p>
+    <section class="panel"><h2>Fields and record types</h2><p>Add, rename, reorder, or remove fields on any record type. Change dropdown choices like ticket statuses.</p>
       <div class="row">${ENTS.map(e => `<a class="btn" href="#/fields/${e}">${h(sch(e).label)}</a>`).join('')}</div></section>
-    <section class="panel"><h2>What counts as finished</h2><p>Finished tickets and follow-ups leave the bench and the due list.</p>
+    <section class="panel"><h2>What counts as finished</h2><p>Finished records drop out of the bench, the due list, and "Open only" views.</p>
       <div class="formgrid">
         <fieldset class="f" style="border:0;padding:0;margin:0"><legend>Closed ticket statuses</legend>${ts ? ts.options.map(o => `<label class="f chk" style="padding-top:.3rem"><input type="checkbox" data-in="statusset" data-k="closed" value="${h(o)}" ${S.closed.includes(o)?'checked':''}>${h(o)}</label>`).join('') : ''}</fieldset>
+${[['estimates','estDone','Finished estimate statuses'],['invoices','invDone','Finished invoice statuses']].map(([e,k,lab]) => { const sf = fld(e,'status');
+          return sf ? `<fieldset class="f" style="border:0;padding:0;margin:0"><legend>${lab}</legend>${sf.options.map(o => `<label class="f chk" style="padding-top:.3rem"><input type="checkbox" data-in="statusset" data-k="${k}" value="${h(o)}" ${(S[k]||[]).includes(o)?'checked':''}>${h(o)}</label>`).join('')}</fieldset>` : ''; }).join('')}
         <fieldset class="f" style="border:0;padding:0;margin:0"><legend>Done follow-up statuses</legend>${fs ? fs.options.map(o => `<label class="f chk" style="padding-top:.3rem"><input type="checkbox" data-in="statusset" data-k="done" value="${h(o)}" ${S.done.includes(o)?'checked':''}>${h(o)}</label>`).join('') : ''}</fieldset>
+      </div></section>
+    <section class="panel"><h2>Follow-ups after payment</h2><p>When an invoice moves to one of these statuses, two check-in follow-ups are created for that customer, counted from the invoice's service date. This happens once per invoice. Cell numbers get a Text follow-up; others get a Call.</p>
+      <div class="formgrid">
+        <label class="f chk" style="padding-top:0"><input type="checkbox" data-in="settingchk" data-k="fuEnabled" ${S.fuEnabled?'checked':''}>Create follow-ups automatically</label>
+        <label class="f">First check-in (days after service)<input type="number" min="1" data-in="setting" data-k="fuDays" value="${h(S.fuDays)}"></label>
+        <label class="f">Second check-in (months after service)<input type="number" min="1" data-in="setting" data-k="fuMonths" value="${h(S.fuMonths)}"></label>
+        ${fld('invoices','status') ? `<fieldset class="f wide" style="border:0;padding:0;margin:0"><legend>Invoice statuses that trigger them</legend><div class="row">${fld('invoices','status').options.map(o => `<label class="f chk" style="padding-top:.3rem"><input type="checkbox" data-in="statusset" data-k="followTrigger" value="${h(o)}" ${(S.followTrigger||[]).includes(o)?'checked':''}>${h(o)}</label>`).join('')}</div></fieldset>` : ''}
+        <label class="f wide">Note printed on invoices<input data-in="setting" data-k="invoiceNote" value="${h(S.invoiceNote||'')}"></label>
       </div></section>
     <section class="panel"><h2>Website chat leads</h2><p>Pull visitors your Wix chat assistant talked to. Each new lead becomes a customer, a ticket with the AI triage notes, and a follow-up due today.</p>
       <div class="formgrid">
@@ -739,12 +886,16 @@ function csvFor(ent){
   return lines.join('\r\n');
 }
 function sample(){
-  const c1 = createRecord('customers', {name:'Martha Ellis', phone:'5025550142', email:'martha.ellis@example.com', contact_pref:'Call', source:'Walk-in'});
+  const c1 = createRecord('customers', {name:'Martha Ellis', phone:'5025550142', phone_mobile:true, email:'martha.ellis@example.com', contact_pref:'Call', source:'Walk-in'});
   const c2 = createRecord('customers', {name:'Carroll County Feed & Seed', company:'Carroll County Feed & Seed', phone:'5025550188', email:'office@example.com', contact_pref:'Email', source:'Referral'});
   const a1 = createRecord('assets', {customer:c1.id, type:'Laptop', make:'HP', model:'Pavilion 15', serial:'5CD1234XYZ', os:'Windows 11'});
   const a2 = createRecord('assets', {customer:c2.id, type:'Desktop', make:'Dell', model:'OptiPlex 7090', os:'Windows 10'});
   const t1 = createRecord('tickets', {title:'Slow startup and pop-ups', customer:c1.id, asset:a1.id, status:'Diagnosing', priority:'Normal', category:'Virus / malware', intake:'Walk-in', date_in:today(), problem:'Takes 10 minutes to boot. Browser opens ads on its own.'});
   createRecord('tickets', {title:'Replace failing hard drive', customer:c2.id, asset:a2.id, status:'Waiting on parts', priority:'High', category:'Hardware', intake:'Onsite', date_in:today(), quote:189});
+  createRecord('estimates', {title:'Replace hard drive with SSD', customer:c2.id, status:'Sent', date:today(), items:[{d:'1 TB SSD',q:1,p:89.99,t:true},{d:'Drive install and data transfer (labor)',q:1.5,p:65,t:true}], tax_rate:6});
+  db.records.estimates.slice(-1).forEach(r => computeTotals('estimates', r.data));
+  createRecord('invoices', {title:'Virus removal and tune-up', customer:c1.id, ticket:t1.id, status:'Sent', date_issued:today(), service_date:today(), items:[{d:'Malware removal and cleanup',q:1,p:95,t:true},{d:'Windows tune-up',q:1,p:35,t:true}], tax_rate:6});
+  db.records.invoices.slice(-1).forEach(r => computeTotals('invoices', r.data));
   createRecord('followups', {subject:'Call Martha with diagnosis', customer:c1.id, ticket:t1.id, method:'Call', due:today(), status:'Pending'});
   save(); toast('Sample records added'); location.hash = '#/';
 }
@@ -808,6 +959,26 @@ function importLead(L){
 }
 
 /* ---------- print ---------- */
+function printDoc(ent, id){
+  const r = find(ent, id); if (!r) return;
+  const S = db.settings, c = find('customers', r.data.customer), sc = sch(ent), D = r.data;
+  const items = Array.isArray(D.items) ? D.items : [];
+  const money = v => fmt({type:'currency'}, v) || '$0.00';
+  const dates = [['date','Date'],['date_issued','Date'],['service_date','Service date'],['due','Payment due'],['valid_until','Valid until'],['paid_date','Paid']]
+    .filter(([k]) => D[k] && fld(ent,k)).map(([k,l]) => `<div><b>${l}:</b> ${h(fmt({type:'date'}, D[k]))}</div>`).join('');
+  const totals = [['subtotal','Subtotal'],['tax',`Tax${D.tax_rate ? ' (' + D.tax_rate + '%)' : ''}`],['total','Total'],['amount_paid','Paid'],['balance','Balance due']]
+    .filter(([k]) => fld(ent,k) && (k!=='amount_paid' || +D.amount_paid)).map(([k,l]) => `<tr><td colspan="3" style="text-align:right;border:0">${h(l)}</td><td style="text-align:right;${k==='total'||k==='balance'?'font-weight:700':''}">${money(D[k])}</td></tr>`).join('');
+  $('#print').innerHTML = `<div style="display:flex;justify-content:space-between;gap:24pt"><div><h1>${h(S.shopName)}</h1><p>${h(S.shopLine)}</p></div>
+      <div style="text-align:right"><h2 style="font-size:16pt;margin:0">${h(sc.singular.toUpperCase())}</h2><p style="margin:.2em 0">${h(tagOf(ent,r))}</p>${D.status ? `<p style="margin:0">${h(D.status)}</p>` : ''}</div></div>
+    <div style="display:flex;justify-content:space-between;gap:24pt;margin:12pt 0"><div><b>Bill to</b><br>${c ? h(label('customers',c)) : ''}${c && c.data.address ? '<br>' + h(c.data.address).replace(/\n/g,'<br>') : ''}${c ? '<br>' + h([fmt({type:'phone'}, c.data.phone), c.data.email].filter(Boolean).join('  |  ')) : ''}</div><div style="text-align:right">${dates}</div></div>
+    ${D.title ? `<p><b>${h(D.title)}</b></p>` : ''}
+    <table class="items"><thead><tr><th>Description</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Amount</th></tr></thead>
+    <tbody>${items.map(l => `<tr><td>${h(l.d)}${l.t === false ? ' <small>(non-taxable)</small>' : ''}</td><td style="text-align:right">${h(l.q)}</td><td style="text-align:right">${money(l.p)}</td><td style="text-align:right">${money(round2(l.q*l.p))}</td></tr>`).join('')}${totals}</tbody></table>
+    ${D.payment_method && D.status === 'Paid' ? `<p>Paid by ${h(D.payment_method)}.</p>` : ''}
+    ${D.notes ? `<p style="white-space:pre-wrap">${h(D.notes)}</p>` : ''}
+    ${ent === 'estimates' ? `<p style="font-size:9.5pt">This is an estimate, not a bill. Final cost may change if we find something unexpected; we'll check with you first.</p><div class="sig"><div>Approved by</div><div>Date</div></div>` : `<p style="margin-top:14pt">${h(S.invoiceNote || '')}</p>`}`;
+  window.print();
+}
 function printTicket(id){
   const r = find('tickets', id); if (!r) return;
   const S = db.settings; const c = find('customers', r.data.customer); const a = find('assets', r.data.asset);
@@ -832,6 +1003,10 @@ document.addEventListener('click', e => {
     if (confirm(`Delete ${sch(ent).singular.toLowerCase()} ${tagOf(ent,r)}? Linked records stay but will show as removed.`)){
       tombstone([r.id]); db.records[ent] = db.records[ent].filter(x => x.id !== r.id); save(); toast('Deleted'); location.hash = '#/list/' + ent; } }
   else if (act === 'print') printTicket(t.dataset.id);
+  else if (act === 'print-doc') printDoc(ent, t.dataset.id);
+  else if (act === 'est-to-inv') estimateToInvoice(t.dataset.id);
+  else if (act === 'line-add'){ const tb = $('tbody', t.closest('.lines')); tb.insertAdjacentHTML('beforeend', lineRow({q:1, t:true})); $('tr:last-child .li-d', tb).focus(); }
+  else if (act === 'line-del'){ const form = t.closest('form'); const tb = t.closest('tbody'); t.closest('tr').remove(); if (!tb.children.length) tb.insertAdjacentHTML('beforeend', lineRow({q:1, t:true})); recalc(form); }
   else if (act === 'fld-add') editField(ent);
   else if (act === 'fld-edit') editField(ent, +t.dataset.i);
   else if (act === 'fld-move'){ const fs = sch(ent).fields, i = +t.dataset.i, j = i + (+t.dataset.d); [fs[i], fs[j]] = [fs[j], fs[i]]; save(); route(); }
@@ -863,8 +1038,8 @@ document.addEventListener('keydown', e => {
   const typingIn = e.target.closest('input,textarea,select,[contenteditable]');
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's'){
     const f = $('#dlg[open] form') || $('#recform'); if (f){ e.preventDefault(); f.requestSubmit(); } return; }
-  if (e.altKey && /^[1-6]$/.test(e.key)){ e.preventDefault();
-    location.hash = ['#/','#/list/customers','#/list/assets','#/list/tickets','#/list/followups','#/settings'][+e.key-1]; return; }
+  if (e.altKey && /^[1-8]$/.test(e.key)){ e.preventDefault();
+    location.hash = ['#/', ...ENTS.map(x => '#/list/' + x), '#/settings'][+e.key-1]; return; }
   if (typingIn || e.ctrlKey || e.metaKey || e.altKey || $('#dlg[open]')) return;
   const {parts} = parseHash();
   if (e.key === '/'){ const s = $('[data-in=search]'); if (s){ e.preventDefault(); s.focus(); s.select(); } }
@@ -881,6 +1056,7 @@ document.addEventListener('keydown', e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.dataset.in === 'search'){ ui.q[t.dataset.ent] = t.value; fillRows(t.dataset.ent); }
+  const form = t.closest('#recform'); if (form && (t.closest('.lines') || t.name === 'f_tax_rate' || t.name === 'f_amount_paid')) recalc(form);
 });
 document.addEventListener('change', e => {
   const t = e.target, k = t.dataset.k;
@@ -889,6 +1065,7 @@ document.addEventListener('change', e => {
     case 'rel': { const form = t.closest('form'); autoFillFrom(form, t); refilter(form); break; }
     case 'ftype': toggleTypeRows($('#dlg'), t.value); break;
     case 'setting': db.settings[k] = t.value.trim(); save(); toast('Saved'); if (k==='autoLock') armIdle(); if (k==='shopName') renderRail('settings'); break;
+    case 'settingchk': db.settings[k] = t.checked; save(); toast('Saved'); break;
     case 'statusset': { const set = new Set(db.settings[k]); t.checked ? set.add(t.value) : set.delete(t.value); db.settings[k] = [...set]; save(); break; }
     case 'entset': { const ent = t.dataset.ent;
       if (k === 'counter') { const n = parseInt(t.value,10); if (n > 0) db.counters[ent] = n - 1; }
