@@ -668,7 +668,8 @@ function viewRecord(ent, id, prefill={}){
       <div><h1>${r ? h(label(ent,r)) : 'New ' + h(sc.singular.toLowerCase())}</h1><p><a href="#/list/${ent}">${h(sc.label)}</a></p></div></div>
       <div class="row">${r && ent==='estimates' ? `<button class="btn" data-act="est-to-inv" data-id="${r.id}">Create invoice from this</button>` : ''}
       ${r && ent==='tickets' ? `<button class="btn" data-act="print" data-id="${r.id}">Print work order</button>` : ''}
-      ${r && (ent==='invoices'||ent==='estimates') ? `<button class="btn" data-act="print-doc" data-ent="${ent}" data-id="${r.id}">Print ${h(sch(ent).singular.toLowerCase())}</button>` : ''}</div></div>
+      ${r && (ent==='invoices'||ent==='estimates') ? `<button class="btn" data-act="print-doc" data-ent="${ent}" data-id="${r.id}">Print ${h(sch(ent).singular.toLowerCase())}</button>
+        <button class="btn" data-act="email-doc" data-ent="${ent}" data-id="${r.id}">Email ${h(sch(ent).singular.toLowerCase())}</button>` : ''}</div></div>
     <div class="record" ${r ? '' : 'style="grid-template-columns:1fr"'}>
       <form class="panel" id="recform" data-ent="${ent}" data-id="${r?r.id:''}" novalidate>
         <div class="formgrid">${fieldsHtml}</div>
@@ -968,7 +969,7 @@ function printDoc(ent, id){
     .filter(([k]) => D[k] && fld(ent,k)).map(([k,l]) => `<div><b>${l}:</b> ${h(fmt({type:'date'}, D[k]))}</div>`).join('');
   const totals = [['subtotal','Subtotal'],['tax',`Tax${D.tax_rate ? ' (' + D.tax_rate + '%)' : ''}`],['total','Total'],['amount_paid','Paid'],['balance','Balance due']]
     .filter(([k]) => fld(ent,k) && (k!=='amount_paid' || +D.amount_paid)).map(([k,l]) => `<tr><td colspan="3" style="text-align:right;border:0">${h(l)}</td><td style="text-align:right;${k==='total'||k==='balance'?'font-weight:700':''}">${money(D[k])}</td></tr>`).join('');
-  $('#print').innerHTML = `<div style="display:flex;justify-content:space-between;gap:24pt"><div><h1>${h(S.shopName)}</h1><p>${h(S.shopLine)}</p></div>
+  $('#print').innerHTML = `<div style="display:flex;justify-content:space-between;gap:24pt"><div style="display:flex;align-items:center;gap:12pt"><img src="logo.png" alt="" class="logo"><div><h1>${h(S.shopName)}</h1><p>${h(S.shopLine)}</p></div></div>
       <div style="text-align:right"><h2 style="font-size:16pt;margin:0">${h(sc.singular.toUpperCase())}</h2><p style="margin:.2em 0">${h(tagOf(ent,r))}</p>${D.status ? `<p style="margin:0">${h(D.status)}</p>` : ''}</div></div>
     <div style="display:flex;justify-content:space-between;gap:24pt;margin:12pt 0"><div><b>Bill to</b><br>${c ? h(label('customers',c)) : ''}${c && c.data.address ? '<br>' + h(c.data.address).replace(/\n/g,'<br>') : ''}${c ? '<br>' + h([fmt({type:'phone'}, c.data.phone), c.data.email].filter(Boolean).join('  |  ')) : ''}</div><div style="text-align:right">${dates}</div></div>
     ${D.title ? `<p><b>${h(D.title)}</b></p>` : ''}
@@ -977,7 +978,31 @@ function printDoc(ent, id){
     ${D.payment_method && D.status === 'Paid' ? `<p>Paid by ${h(D.payment_method)}.</p>` : ''}
     ${D.notes ? `<p style="white-space:pre-wrap">${h(D.notes)}</p>` : ''}
     ${ent === 'estimates' ? `<p style="font-size:9.5pt">This is an estimate, not a bill. Final cost may change if we find something unexpected; we'll check with you first.</p><div class="sig"><div>Approved by</div><div>Date</div></div>` : `<p style="margin-top:14pt">${h(S.invoiceNote || '')}</p>`}`;
-  window.print();
+  const logo = $('#print img.logo');
+  if (logo && !logo.complete) logo.onload = logo.onerror = () => window.print(); // wait so the logo makes it onto the page
+  else window.print();
+}
+// Opens the user's own mail app with a ready-to-send message; they attach the PDF themselves.
+function emailDoc(ent, id){
+  const r = find(ent, id); if (!r) return;
+  const S = db.settings, c = find('customers', r.data.customer), D = r.data, what = sch(ent).singular;
+  const to = c && c.data.email ? String(c.data.email).trim() : '';
+  if (!to){ toast('This customer has no email address on file'); return; }
+  const money = v => fmt({type:'currency'}, v) || '$0.00';
+  const items = Array.isArray(D.items) ? D.items : [];
+  const lines = [
+    `Hi ${String(c.data.name || '').trim().split(/\s+/)[0] || 'there'},`, '',
+    ent === 'estimates' ? `Here is your estimate from ${S.shopName}.` : `Here is your invoice from ${S.shopName}.`, '',
+    `${what} ${tagOf(ent, r)}${D.title ? ' - ' + D.title : ''}`,
+    ...items.map(l => `- ${l.d}: ${l.q} x ${money(l.p)} = ${money(round2(l.q*l.p))}`), '',
+    ...[['subtotal','Subtotal'],['tax','Tax'],['total','Total'],['amount_paid','Paid'],['balance','Balance due']]
+      .filter(([k]) => fld(ent,k) && (k !== 'amount_paid' || +D.amount_paid)).map(([k,l]) => `${l}: ${money(D[k])}`),
+    ...(D.due && ent === 'invoices' ? ['Payment due: ' + fmt({type:'date'}, D.due)] : []),
+    ...(D.valid_until && ent === 'estimates' ? ['Valid until: ' + fmt({type:'date'}, D.valid_until)] : []),
+    '', ent === 'estimates' ? 'Reply to this email to approve, or let us know if you have any questions.' : (S.invoiceNote || ''),
+    '', S.shopName, S.shopLine || ''];
+  const subject = `${what} ${tagOf(ent, r)} from ${S.shopName}`;
+  location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join('\n').trim())}`;
 }
 function printTicket(id){
   const r = find('tickets', id); if (!r) return;
@@ -1004,6 +1029,7 @@ document.addEventListener('click', e => {
       tombstone([r.id]); db.records[ent] = db.records[ent].filter(x => x.id !== r.id); save(); toast('Deleted'); location.hash = '#/list/' + ent; } }
   else if (act === 'print') printTicket(t.dataset.id);
   else if (act === 'print-doc') printDoc(ent, t.dataset.id);
+  else if (act === 'email-doc') emailDoc(ent, t.dataset.id);
   else if (act === 'est-to-inv') estimateToInvoice(t.dataset.id);
   else if (act === 'line-add'){ const tb = $('tbody', t.closest('.lines')); tb.insertAdjacentHTML('beforeend', lineRow({q:1, t:true})); $('tr:last-child .li-d', tb).focus(); }
   else if (act === 'line-del'){ const form = t.closest('form'); const tb = t.closest('tbody'); t.closest('tr').remove(); if (!tb.children.length) tb.insertAdjacentHTML('beforeend', lineRow({q:1, t:true})); recalc(form); }
