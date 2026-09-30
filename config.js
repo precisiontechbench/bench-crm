@@ -1,1 +1,3 @@
-window.PTB_VAULT = null; // replaced by the config.js the setup screen gives you
+// Bench CRM login vault. Encrypted with your username and password (PBKDF2-SHA256, 600,000 rounds, AES-256-GCM).
+// Safe to commit; useless without the password. Regenerate it from Settings > Security.
+window.PTB_VAULT = {"v":1,"kdf":"PBKDF2-SHA256","iter":600000,"salt":"a49w/l6Ad59KZtmc6cDj6w==","iv":"IqEp/2pJq0Q6ppvX","ct":"rTvWZFSN3Y7T6mWiVTEkIO1dyDqrTqR8hU6fp56DCdZvLJCrSm2g6d72ESt7M1S5N/jXmCSDHoGdopdAU+2GOOewX0y2ug5+VF1dO65y/Nh/sKzy9R15pvQ+a4Je+fkaSpakeuVHjViWu+11fSOtIHfqZUqjR76RgvPDau2tbNwIK6pMUl7RdUaWu2JujnsJUHAnAS/nO+MTG/D06xbbyb4LKaV8IwcKaOGUE0cNK0BzFqtG/ef+/OK7UlysS+UnthM9qpFfuJwMmqLNIKB8HrR3qWBoFjhAn9HQUPQTpTdtKJXqZJ+muhTthScVWSKPOe6MUqdk6VGU5YVfIAwPK1gJh4F8xc0sP61S6EykwWCsWbk2TfBVM2CMPw=="};
