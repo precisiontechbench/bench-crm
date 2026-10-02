@@ -74,7 +74,8 @@ const DEFAULT_SCHEMA = {
     F('status','Status','select',{list:true,locked:true,default:'Draft',options:['Draft','Sent','Paid','Closed','Void']}),
     F('date_issued','Date issued','date',{list:true,default:'today'}),
     F('service_date','Service date','date',{locked:true,default:'today',hint:'Automatic follow-ups are scheduled from this date.'}),
-    F('due','Payment due','date'),
+    F('terms','Net terms','select',{default:'Due on receipt',options:['Due on receipt','Net 7','Net 15','Net 30'],hint:'Picking terms fills in the Balance due date from the Date issued. You can still change that date.'}),
+    F('due','Balance due date','date',{list:true}),
     F('items','Line items','lineitems',{locked:true}),
     F('tax_rate','Tax rate (%)','number',{default:'6',hint:'Kentucky sales tax is 6%. Untick Tax on any line that is not taxable.'}),
     F('subtotal','Subtotal','currency',{calc:true,locked:true}),
@@ -121,7 +122,7 @@ function freshDb(){
   return { v:1, schema:clone(DEFAULT_SCHEMA),
     records:{customers:[],assets:[],tickets:[],estimates:[],invoices:[],services:[],followups:[]},
     counters:{customers:1000,assets:1000,tickets:1000,estimates:1000,invoices:1000,services:1000,followups:1000},
-    meta:{updated:0, configUpdated:0, mig:['phone_mobile','fu_invoice']},
+    meta:{updated:0, configUpdated:0, mig:['phone_mobile','fu_invoice','inv_terms']},
     settings:{ shopName:'Precision Tech Bench', shopLine:'439 Main Street, Carrollton, KY 41008',
       terms:'Please back up your data. We are not responsible for data loss during repair. Devices not picked up within 30 days of notice may be recycled.',
       closed:['Closed'], done:['Done'], estDone:['Declined','Expired','Converted'], invDone:['Paid','Closed','Void'], svcDone:['Retired'],
@@ -249,6 +250,11 @@ function ensureShape(d){
     const i = fs.findIndex(x => x.id === afterId); fs.splice(i < 0 ? fs.length : i + 1, 0, clone(field)); };
   once('phone_mobile', () => addAfter('customers', 'phone', DEFAULT_SCHEMA.customers.fields.find(x => x.id === 'phone_mobile')));
   once('fu_invoice', () => addAfter('followups', 'ticket', DEFAULT_SCHEMA.followups.fields.find(x => x.id === 'invoice')));
+  once('inv_terms', () => {
+    addAfter('invoices', 'service_date', DEFAULT_SCHEMA.invoices.fields.find(x => x.id === 'terms'));
+    const due = d.schema.invoices?.fields.find(x => x.id === 'due');
+    if (due){ due.label = 'Balance due date'; due.list = true; }
+  });
   return d;
 }
 
@@ -611,6 +617,17 @@ function applyService(tr){
   const s = activeServices().find(r => String(r.data.item).trim().toLowerCase() === name); if (!s) return;
   $('.li-p', tr).value = s.data.price ?? ''; $('.li-t', tr).checked = s.data.taxable !== 'Non-taxable';
 }
+// Balance due date = Date issued + the Net terms days.
+function dueFrom(issued, terms){
+  if (!issued) return '';
+  if (terms === 'Due on receipt') return issued;
+  const n = parseInt(String(terms || '').replace(/\D/g, ''), 10);
+  return n ? shiftDate(issued, {days:n}) : '';
+}
+function setDueFromTerms(form){
+  const E = form.elements, d = dueFrom(E.f_date_issued?.value, E.f_terms?.value);
+  if (d && E.f_due) E.f_due.value = d;
+}
 function readLines(form, id){
   return $$(`[data-lines="${id}"] tbody tr`, form).map(tr => ({ d:$('.li-d',tr).value.trim(), q:+$('.li-q',tr).value || 0, p:+$('.li-p',tr).value || 0, t:$('.li-t',tr).checked }))
     .filter(l => l.d || l.p);
@@ -623,7 +640,7 @@ function recalc(form){
   for (const k of ['subtotal','tax','total','balance']) { const el = form.elements['f_'+k]; if (el && d[k] !== undefined) el.value = d[k].toFixed(2); }
 }
 function inputFor(f, v){
-  const n = `name="f_${f.id}" id="f_${f.id}"` + (f.calc ? ' readonly tabindex="-1" class="calc"' : ''), req = f.required ? 'required' : '';
+  const n = `name="f_${f.id}" id="f_${f.id}"` + (f.calc ? ' readonly tabindex="-1" class="calc"' : '') + (f.id === 'terms' || f.id === 'date_issued' ? ' data-in="terms"' : ''), req = f.required ? 'required' : '';
   const val = v ?? '';
   switch (f.type){
     case 'textarea': return `<textarea ${n} ${req}>${h(val)}</textarea>`;
@@ -664,6 +681,7 @@ function viewRecord(ent, id, prefill={}){
   else { data = {}; for (const f of sc.fields) if (f.default !== undefined && f.default !== '') data[f.id] = resolveDefault(f);
     for (const [k,v] of Object.entries(prefill)) if (fld(ent,k)) data[k] = v;
     if (ent === 'invoices' && prefill.copy === '1' && copyDraft) Object.assign(data, clone(copyDraft));
+    if (ent === 'invoices' && data.terms) data.due = dueFrom(data.date_issued, data.terms) || data.due;
     expandPrefill(ent, data); }
   const fieldsHtml = sc.fields.map(f => {
     if (f.type === 'checkbox') return `<label class="f chk">${inputFor(f, data[f.id])}${h(f.label)}</label>`;
@@ -736,6 +754,7 @@ function saveRecord(form){
     if (f.type==='email' && v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { toast('Check the email address format.'); el.focus(); return; }
     if (v !== '' && v !== false) data[f.id] = v;
   }
+  if (ent === 'invoices' && data.terms && !data.due) data.due = dueFrom(data.date_issued, data.terms) || undefined;
   if (ent === 'invoices' && data.status === 'Paid'){
     computeTotals(ent, data);
     if (fld(ent,'amount_paid') && data.amount_paid === undefined && data.total) data.amount_paid = data.total;
@@ -779,7 +798,7 @@ let copyDraft = null;
 function copyInvoice(id){
   const inv = find('invoices', id); if (!inv) return;
   copyDraft = {};
-  for (const k of ['title','customer','items','tax_rate','notes']) if (inv.data[k] !== undefined && fld('invoices', k)) copyDraft[k] = clone(inv.data[k]);
+  for (const k of ['title','customer','items','tax_rate','notes','terms']) if (inv.data[k] !== undefined && fld('invoices', k)) copyDraft[k] = clone(inv.data[k]);
   location.hash = '#/new/invoices?copy=1';
   toast(`Copied from ${tagOf('invoices', inv)}. Choose the new ticket or device, then save.`);
 }
@@ -789,6 +808,7 @@ function estimateToInvoice(id){
   for (const k of ['title','customer','ticket','items','tax_rate','notes']) if (e.data[k] !== undefined && fld('invoices', k)) d[k] = clone(e.data[k]);
   setIf('invoices', d, 'estimate', e.id);
   for (const f of sch('invoices').fields) if (d[f.id] === undefined && f.default !== undefined && f.default !== '') d[f.id] = resolveDefault(f);
+  if (d.terms && !d.due) d.due = dueFrom(d.date_issued, d.terms) || undefined;
   computeTotals('invoices', d);
   const inv = createRecord('invoices', d);
   if (fld('estimates','status')?.options.includes('Converted')){ e.data.status = 'Converted'; e.updated = new Date().toISOString(); }
@@ -997,7 +1017,7 @@ function printDoc(ent, id){
   const S = db.settings, c = find('customers', r.data.customer), sc = sch(ent), D = r.data;
   const items = Array.isArray(D.items) ? D.items : [];
   const money = v => fmt({type:'currency'}, v) || '$0.00';
-  const dates = [['date','Date'],['date_issued','Date'],['service_date','Service date'],['due','Payment due'],['valid_until','Valid until'],['paid_date','Paid']]
+  const dates = [['date','Date'],['date_issued','Date'],['service_date','Service date'],['due','Balance due date'],['valid_until','Valid until'],['paid_date','Paid']]
     .filter(([k]) => D[k] && fld(ent,k)).map(([k,l]) => `<div><b>${l}:</b> ${h(fmt({type:'date'}, D[k]))}</div>`).join('');
   const totals = [['subtotal','Subtotal'],['tax',`Tax${D.tax_rate ? ' (' + D.tax_rate + '%)' : ''}`],['total','Total'],['amount_paid','Paid'],['balance','Balance due']]
     .filter(([k]) => fld(ent,k) && (k!=='amount_paid' || +D.amount_paid)).map(([k,l]) => `<tr><td colspan="3" style="text-align:right;border:0">${h(l)}</td><td style="text-align:right;${k==='total'||k==='balance'?'font-weight:700':''}">${money(D[k])}</td></tr>`).join('');
@@ -1044,7 +1064,7 @@ function emailDoc(ent, id){
     ...items.map(l => `- ${l.d}: ${l.q} x ${money(l.p)} = ${money(round2(l.q*l.p))}`), '',
     ...[['subtotal','Subtotal'],['tax','Tax'],['total','Total'],['amount_paid','Paid'],['balance','Balance due']]
       .filter(([k]) => fld(ent,k) && (k !== 'amount_paid' || +D.amount_paid)).map(([k,l]) => `${l}: ${money(D[k])}`),
-    ...(D.due && ent === 'invoices' ? ['Payment due: ' + fmt({type:'date'}, D.due)] : []),
+    ...(D.due && ent === 'invoices' ? [`Balance due date: ${fmt({type:'date'}, D.due)}${D.terms ? ' (' + D.terms + ')' : ''}`] : []),
     ...(D.valid_until && ent === 'estimates' ? ['Valid until: ' + fmt({type:'date'}, D.valid_until)] : []),
     '', ent === 'estimates' ? 'Reply to this email to approve, or let us know if you have any questions.' : (S.invoiceNote || ''),
     '', S.shopName, S.shopLine || ''];
@@ -1138,6 +1158,7 @@ document.addEventListener('change', e => {
   const t = e.target, k = t.dataset.k;
   switch (t.dataset.in){
     case 'filter': ui.filter[t.dataset.ent] = t.value; fillRows(t.dataset.ent); break;
+    case 'terms': { const form = t.closest('form'); if (form) setDueFromTerms(form); break; }
     case 'rel': { const form = t.closest('form'); autoFillFrom(form, t); refilter(form); break; }
     case 'ftype': toggleTypeRows($('#dlg'), t.value); break;
     case 'setting': db.settings[k] = t.value.trim(); save(); toast('Saved'); if (k==='autoLock') armIdle(); if (k==='shopName') renderRail('settings'); break;
