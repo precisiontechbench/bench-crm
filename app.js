@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 const KEY = 'ptb-bench-crm';
-const ENTS = ['customers','assets','tickets','estimates','invoices','followups'];
+const ENTS = ['customers','assets','tickets','estimates','invoices','services','followups'];
 const $ = (s, el=document) => el.querySelector(s);
 const $$ = (s, el=document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -85,6 +85,14 @@ const DEFAULT_SCHEMA = {
     F('payment_method','Payment method','select',{options:['Cash','Card','Check','Zelle','Venmo','Other']}),
     F('paid_date','Date paid','date'),
     F('notes','Notes for the customer','textarea')]},
+  services:{label:'Services', singular:'Service', prefix:'SVC', fields:[
+    F('item','Item','text',{required:true,list:true,title:true,locked:true}),
+    F('category','Category','select',{list:true,options:['Labor','Diagnostics','Repair','Virus / malware','Data recovery','Setup / install','Parts','Onsite','Remote support','Other']}),
+    F('price','Price','currency',{required:true,list:true,locked:true}),
+    F('unit','Priced per','select',{list:true,default:'Each',options:['Each','Hour','Flat rate']}),
+    F('taxable','Tax','select',{list:true,locked:true,default:'Taxable',options:['Taxable','Non-taxable'],hint:'Sets the Tax box when you add this service to an estimate or invoice.'}),
+    F('status','Status','select',{list:true,locked:true,default:'Active',options:['Active','Retired'],hint:'Retired services stay on old invoices but are no longer suggested.'}),
+    F('description','Description','textarea')]},
   followups:{label:'Follow-ups', singular:'Follow-up', prefix:'F', fields:[
     F('subject','Subject','text',{required:true,list:true,title:true}),
     F('customer','Customer','relation',{target:'customers',list:true,locked:true}),
@@ -103,6 +111,7 @@ const ICON = {
   followups:'<rect x="3.5" y="5" width="17" height="15.5" rx="1.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
   estimates:'<rect x="5" y="4" width="14" height="17" rx="1.5"/><path d="M9 4V2.5h6V4M8.5 10h7M8.5 14h4.5"/>',
   invoices:'<path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+  services:'<path d="M3.5 3.5h8l9 9-8 8-9-9z"/><circle cx="8" cy="8" r="1.5"/>',
   settings:'<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>'
 };
 const icon = k => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[k]||''}</svg>`;
@@ -110,12 +119,12 @@ const icon = k => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[
 /* ---------- storage ---------- */
 function freshDb(){
   return { v:1, schema:clone(DEFAULT_SCHEMA),
-    records:{customers:[],assets:[],tickets:[],estimates:[],invoices:[],followups:[]},
-    counters:{customers:1000,assets:1000,tickets:1000,estimates:1000,invoices:1000,followups:1000},
+    records:{customers:[],assets:[],tickets:[],estimates:[],invoices:[],services:[],followups:[]},
+    counters:{customers:1000,assets:1000,tickets:1000,estimates:1000,invoices:1000,services:1000,followups:1000},
     meta:{updated:0, configUpdated:0, mig:['phone_mobile','fu_invoice']},
     settings:{ shopName:'Precision Tech Bench', shopLine:'439 Main Street, Carrollton, KY 41008',
       terms:'Please back up your data. We are not responsible for data loss during repair. Devices not picked up within 30 days of notice may be recycled.',
-      closed:['Closed'], done:['Done'], estDone:['Declined','Expired','Converted'], invDone:['Paid','Closed','Void'],
+      closed:['Closed'], done:['Done'], estDone:['Declined','Expired','Converted'], invDone:['Paid','Closed','Void'], svcDone:['Retired'],
       followTrigger:['Paid','Closed'], fuEnabled:true, fuDays:14, fuMonths:2, invoiceNote:'Thank you for choosing Precision Tech Bench!',
       leadsUrl:'', leadsKey:'', imported:[], lastSync:'', lastBackup:'', autoLock:30 } };
 }
@@ -143,7 +152,7 @@ function fmt(f, v, depth=0){
     default: return String(v);
   }
 }
-const DONE_KEY = {tickets:'closed', followups:'done', estimates:'estDone', invoices:'invDone'};
+const DONE_KEY = {tickets:'closed', followups:'done', estimates:'estDone', invoices:'invDone', services:'svcDone'};
 const isClosed = (ent,r) => DONE_KEY[ent] ? (db.settings[DONE_KEY[ent]] || []).includes(r.data.status) : false;
 const round2 = n => Math.round((+n || 0) * 100) / 100;
 function shiftDate(iso, {days=0, months=0}){
@@ -164,7 +173,7 @@ function computeTotals(ent, data){
   put('balance', round2(total - (+data.amount_paid || 0)));
   return data;
 }
-const STATUS_COLORS = {'New':'var(--focus)','Diagnosing':'var(--warn)','Waiting on parts':'var(--warn)','Waiting on customer':'var(--warn)','In progress':'var(--mat-dim)','Ready for pickup':'var(--ok)','Closed':'var(--muted)','Pending':'var(--warn)','Done':'var(--ok)','Draft':'var(--muted)','Sent':'var(--focus)','Paid':'var(--ok)','Approved':'var(--ok)','Declined':'var(--danger)','Void':'var(--muted)','Converted':'var(--mat-dim)','Urgent':'var(--danger)','High':'var(--warn)'};
+const STATUS_COLORS = {'New':'var(--focus)','Diagnosing':'var(--warn)','Waiting on parts':'var(--warn)','Waiting on customer':'var(--warn)','In progress':'var(--mat-dim)','Ready for pickup':'var(--ok)','Closed':'var(--muted)','Pending':'var(--warn)','Done':'var(--ok)','Draft':'var(--muted)','Sent':'var(--focus)','Paid':'var(--ok)','Approved':'var(--ok)','Declined':'var(--danger)','Void':'var(--muted)','Converted':'var(--mat-dim)','Urgent':'var(--danger)','High':'var(--warn)','Active':'var(--ok)','Retired':'var(--muted)'};
 const pill = v => v ? `<span class="pill" style="--pc:${STATUS_COLORS[v]||'var(--muted)'}">${h(v)}</span>` : '';
 function cell(ent, f, r){
   const v = r.data[f.id];
@@ -479,7 +488,7 @@ function renderRail(active){
   const items = [['bench','#/','Bench'], ...ENTS.map(e => [e, '#/list/'+e, sch(e).label]), ['settings','#/settings','Settings']];
   $('#rail').innerHTML = `<div class="brand"><b>Bench CRM</b><span>${h(db.settings.shopName)}</span></div>` +
     items.map(([k,href,lab]) => `<a href="${href}" ${k===active?'aria-current="page"':''}>${icon(k)}<span>${h(lab)}</span></a>`).join('') +
-    `<div class="spacer"></div><div class="syncstat" id="syncstat" aria-live="polite"></div><div class="keys"><kbd>N</kbd>new<br><kbd>/</kbd>search<br><kbd>Ctrl</kbd><kbd>S</kbd>save<br><kbd>Alt</kbd><kbd>1</kbd>–<kbd>8</kbd>sections</div><button data-act="lock">Lock</button>`;
+    `<div class="spacer"></div><div class="syncstat" id="syncstat" aria-live="polite"></div><div class="keys"><kbd>N</kbd>new<br><kbd>/</kbd>search<br><kbd>Ctrl</kbd><kbd>S</kbd>save<br><kbd>Alt</kbd><kbd>1</kbd>–<kbd>9</kbd>sections</div><button data-act="lock">Lock</button>`;
   setSync(syncState.s, syncState.msg);
 }
 function parseHash(){
@@ -539,17 +548,17 @@ function viewBench(){
 }
 
 /* ---------- lists ---------- */
-const ui = { q:{}, sort:{}, filter:{ tickets:'__open', followups:'__open' } };
+const ui = { q:{}, sort:{}, filter:{ tickets:'__open', followups:'__open', services:'__open' } };
 function viewList(ent){
   const sc = sch(ent); const cols = sc.fields.filter(f => f.list);
   const sf = sc.fields.find(f => f.id==='status' && f.type==='select');
   const s = ui.sort[ent] || {k:'no', dir:-1};
   const fv = ui.filter[ent] || '';
   return `<div class="head"><div><h1>${h(sc.label)}</h1><p>${db.records[ent].length} total</p></div>
-    <div class="row"><a class="btn small" href="#/fields/${ent}">Edit fields</a><a class="btn primary" href="#/new/${ent}">New ${h(sc.singular.toLowerCase())}</a></div></div>
+    <div class="row">${ent === 'services' ? `<button class="btn small" data-act="csv" data-ent="services">Export CSV</button><button class="btn small" data-act="print-prices">Print price list</button>` : ''}<a class="btn small" href="#/fields/${ent}">Edit fields</a><a class="btn primary" href="#/new/${ent}">New ${h(sc.singular.toLowerCase())}</a></div></div>
     <div class="toolbar"><input type="search" placeholder="Search ${h(sc.label.toLowerCase())}" aria-label="Search" data-in="search" data-ent="${ent}" value="${h(ui.q[ent]||'')}">
     ${sf ? `<select data-in="filter" data-ent="${ent}" aria-label="Filter by status"><option value="">All statuses</option>
-      ${DONE_KEY[ent] ? `<option value="__open" ${fv==='__open'?'selected':''}>Open only</option>` : ''}
+      ${DONE_KEY[ent] ? `<option value="__open" ${fv==='__open'?'selected':''}>${ent === 'services' ? 'Active only' : 'Open only'}</option>` : ''}
       ${sf.options.map(o => `<option ${fv===o?'selected':''}>${h(o)}</option>`).join('')}</select>` : ''}</div>
     <div class="tablewrap"><table class="grid"><thead><tr>
       <th data-act="sort" data-ent="${ent}" data-k="no" ${s.k==='no' ? `aria-sort="${s.dir>0?'ascending':'descending'}"` : ''}>No.</th>
@@ -588,12 +597,20 @@ function relOptions(f, cur, cons=[]){
   return `<option value="">Choose ${h(sch(f.target).singular.toLowerCase())}</option>` +
     recs.map(r => `<option value="${r.id}" ${r.id===cur?'selected':''}>${h(label(f.target,r))} (${h(tagOf(f.target,r))})</option>`).join('');
 }
-const lineRow = l => `<tr><td><input class="li-d" value="${h(l.d||'')}" placeholder="Labor, part, or service" aria-label="Description"></td>
+const lineRow = l => `<tr><td><input class="li-d" list="svc-list" value="${h(l.d||'')}" placeholder="Labor, part, or service" aria-label="Description"></td>
   <td class="num"><input class="li-q" type="number" step="any" value="${h(l.q ?? 1)}" aria-label="Quantity"></td>
   <td class="num"><input class="li-p" type="number" step="0.01" value="${h(l.p ?? '')}" aria-label="Price"></td>
   <td class="num"><input class="li-t" type="checkbox" ${l.t === false ? '' : 'checked'} aria-label="Taxable"></td>
   <td class="num li-a">${fmt({type:'currency'}, round2((+l.q||0)*(+l.p||0))) || '$0.00'}</td>
   <td><button type="button" class="btn small danger" data-act="line-del" aria-label="Remove line">✕</button></td></tr>`;
+const activeServices = () => (db.records.services || []).filter(r => r.data.item && !isClosed('services', r))
+  .sort((a,b) => String(a.data.item).localeCompare(String(b.data.item)));
+// Picking a service by name on a line item fills in its price and tax setting.
+function applyService(tr){
+  const name = $('.li-d', tr).value.trim().toLowerCase(); if (!name) return;
+  const s = activeServices().find(r => String(r.data.item).trim().toLowerCase() === name); if (!s) return;
+  $('.li-p', tr).value = s.data.price ?? ''; $('.li-t', tr).checked = s.data.taxable !== 'Non-taxable';
+}
 function readLines(form, id){
   return $$(`[data-lines="${id}"] tbody tr`, form).map(tr => ({ d:$('.li-d',tr).value.trim(), q:+$('.li-q',tr).value || 0, p:+$('.li-p',tr).value || 0, t:$('.li-t',tr).checked }))
     .filter(l => l.d || l.p);
@@ -622,7 +639,8 @@ function inputFor(f, v){
     case 'url': return `<input type="url" ${n} ${req} value="${h(val)}" placeholder="https://">`;
     case 'lineitems': { const rows = Array.isArray(val) && val.length ? val : [{q:1, t:true}];
       return `<div class="lines" data-lines="${f.id}"><table><thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Tax</th><th class="num">Amount</th><th></th></tr></thead>
-        <tbody>${rows.map(lineRow).join('')}</tbody></table><button type="button" class="btn small" data-act="line-add">Add line</button></div>`; }
+        <tbody>${rows.map(lineRow).join('')}</tbody></table><button type="button" class="btn small" data-act="line-add">Add line</button>
+        <datalist id="svc-list">${activeServices().map(s => `<option value="${h(s.data.item)}">${h(fmt({type:'currency'}, s.data.price))}${s.data.unit && s.data.unit !== 'Each' ? ' / ' + h(s.data.unit.toLowerCase()) : ''}</option>`).join('')}</datalist></div>`; }
     default: return `<input type="text" ${n} ${req} value="${h(val)}">`;
   }
 }
@@ -644,7 +662,9 @@ function viewRecord(ent, id, prefill={}){
   let data;
   if (r) data = r.data;
   else { data = {}; for (const f of sc.fields) if (f.default !== undefined && f.default !== '') data[f.id] = resolveDefault(f);
-    for (const [k,v] of Object.entries(prefill)) if (fld(ent,k)) data[k] = v; expandPrefill(ent, data); }
+    for (const [k,v] of Object.entries(prefill)) if (fld(ent,k)) data[k] = v;
+    if (ent === 'invoices' && prefill.copy === '1' && copyDraft) Object.assign(data, clone(copyDraft));
+    expandPrefill(ent, data); }
   const fieldsHtml = sc.fields.map(f => {
     if (f.type === 'checkbox') return `<label class="f chk">${inputFor(f, data[f.id])}${h(f.label)}</label>`;
     if (f.type === 'lineitems') return `<div class="f wide"><span>${h(f.label)}</span>${inputFor(f, data[f.id])}</div>`;
@@ -667,6 +687,7 @@ function viewRecord(ent, id, prefill={}){
   return `<div class="head"><div class="row" style="gap:.9rem">${r ? `<span class="tag big">${h(tagOf(ent,r))}</span>` : ''}
       <div><h1>${r ? h(label(ent,r)) : 'New ' + h(sc.singular.toLowerCase())}</h1><p><a href="#/list/${ent}">${h(sc.label)}</a></p></div></div>
       <div class="row">${r && ent==='estimates' ? `<button class="btn" data-act="est-to-inv" data-id="${r.id}">Create invoice from this</button>` : ''}
+      ${r && ent==='invoices' ? `<button class="btn" data-act="copy-inv" data-id="${r.id}">Copy to new invoice</button>` : ''}
       ${r && ent==='tickets' ? `<button class="btn" data-act="print" data-id="${r.id}">Print work order</button>` : ''}
       ${r && (ent==='invoices'||ent==='estimates') ? `<button class="btn" data-act="print-doc" data-ent="${ent}" data-id="${r.id}">Print ${h(sch(ent).singular.toLowerCase())}</button>
         <button class="btn" data-act="email-doc" data-ent="${ent}" data-id="${r.id}">Email ${h(sch(ent).singular.toLowerCase())}</button>` : ''}</div></div>
@@ -752,6 +773,15 @@ function scheduleInvoiceFollowups(inv){
   }
   inv.autoFU = new Date().toISOString();
   return `Saved. Follow-ups set for ${steps.map(s => fmt({type:'date'}, s.due)).join(' and ')}.`;
+}
+// Copies an invoice's customer, lines, tax and notes into a new unsaved invoice. Ticket, dates, status and payments start fresh.
+let copyDraft = null;
+function copyInvoice(id){
+  const inv = find('invoices', id); if (!inv) return;
+  copyDraft = {};
+  for (const k of ['title','customer','items','tax_rate','notes']) if (inv.data[k] !== undefined && fld('invoices', k)) copyDraft[k] = clone(inv.data[k]);
+  location.hash = '#/new/invoices?copy=1';
+  toast(`Copied from ${tagOf('invoices', inv)}. Choose the new ticket or device, then save.`);
 }
 function estimateToInvoice(id){
   const e = find('estimates', id); if (!e) return;
@@ -897,6 +927,8 @@ function sample(){
   db.records.estimates.slice(-1).forEach(r => computeTotals('estimates', r.data));
   createRecord('invoices', {title:'Virus removal and tune-up', customer:c1.id, ticket:t1.id, status:'Sent', date_issued:today(), service_date:today(), items:[{d:'Malware removal and cleanup',q:1,p:95,t:true},{d:'Windows tune-up',q:1,p:35,t:true}], tax_rate:6});
   db.records.invoices.slice(-1).forEach(r => computeTotals('invoices', r.data));
+  for (const [item, category, price, unit, taxable] of [['Diagnostic fee','Diagnostics',49,'Flat rate','Non-taxable'],['Virus and malware removal','Virus / malware',95,'Flat rate','Taxable'],['Bench labor','Labor',65,'Hour','Taxable'],['Data transfer','Data recovery',75,'Flat rate','Taxable']])
+    createRecord('services', {item, category, price, unit, taxable, status:'Active'});
   createRecord('followups', {subject:'Call Martha with diagnosis', customer:c1.id, ticket:t1.id, method:'Call', due:today(), status:'Pending'});
   save(); toast('Sample records added'); location.hash = '#/';
 }
@@ -978,9 +1010,24 @@ function printDoc(ent, id){
     ${D.payment_method && D.status === 'Paid' ? `<p>Paid by ${h(D.payment_method)}.</p>` : ''}
     ${D.notes ? `<p style="white-space:pre-wrap">${h(D.notes)}</p>` : ''}
     ${ent === 'estimates' ? `<p style="font-size:9.5pt">This is an estimate, not a bill. Final cost may change if we find something unexpected; we'll check with you first.</p><div class="sig"><div>Approved by</div><div>Date</div></div>` : `<p style="margin-top:14pt">${h(S.invoiceNote || '')}</p>`}`;
+  printWhenReady();
+}
+function printWhenReady(){
   const logo = $('#print img.logo');
   if (logo && !logo.complete) logo.onload = logo.onerror = () => window.print(); // wait so the logo makes it onto the page
   else window.print();
+}
+function printPrices(){
+  const S = db.settings, list = activeServices();
+  if (!list.length){ toast('No active services to print yet'); return; }
+  const cats = [...new Set(list.map(r => r.data.category || 'Other'))].sort((a,b) => a.localeCompare(b));
+  $('#print').innerHTML = `<div style="display:flex;justify-content:space-between;gap:24pt"><div style="display:flex;align-items:center;gap:12pt"><img src="logo.png" alt="" class="logo"><div><h1>${h(S.shopName)}</h1><p>${h(S.shopLine)}</p></div></div>
+      <div style="text-align:right"><h2 style="font-size:16pt;margin:0">PRICE LIST</h2><p style="margin:.2em 0">${h(fmt({type:'date'}, today()))}</p></div></div>
+    <table class="items" style="margin-top:12pt"><thead><tr><th>Service</th><th style="text-align:right">Price</th><th>Tax</th></tr></thead><tbody>
+    ${cats.map(c => `<tr><td colspan="3" style="background:#eee;font-weight:700">${h(c)}</td></tr>` + list.filter(r => (r.data.category || 'Other') === c).map(r => `<tr><td>${h(r.data.item)}${r.data.description ? `<br><small>${h(r.data.description)}</small>` : ''}</td>
+      <td style="text-align:right;white-space:nowrap">${h(fmt({type:'currency'}, r.data.price) || '$0.00')}${r.data.unit && r.data.unit !== 'Each' ? ' / ' + h(r.data.unit.toLowerCase()) : ''}</td><td>${h(r.data.taxable || 'Taxable')}</td></tr>`).join('')).join('')}
+    </tbody></table><p style="margin-top:14pt;font-size:9.5pt">Prices subject to change. Parts are quoted separately unless listed.</p>`;
+  printWhenReady();
 }
 // Opens the user's own mail app with a ready-to-send message; they attach the PDF themselves.
 function emailDoc(ent, id){
@@ -1030,7 +1077,9 @@ document.addEventListener('click', e => {
   else if (act === 'print') printTicket(t.dataset.id);
   else if (act === 'print-doc') printDoc(ent, t.dataset.id);
   else if (act === 'email-doc') emailDoc(ent, t.dataset.id);
+  else if (act === 'print-prices') printPrices();
   else if (act === 'est-to-inv') estimateToInvoice(t.dataset.id);
+  else if (act === 'copy-inv') copyInvoice(t.dataset.id);
   else if (act === 'line-add'){ const tb = $('tbody', t.closest('.lines')); tb.insertAdjacentHTML('beforeend', lineRow({q:1, t:true})); $('tr:last-child .li-d', tb).focus(); }
   else if (act === 'line-del'){ const form = t.closest('form'); const tb = t.closest('tbody'); t.closest('tr').remove(); if (!tb.children.length) tb.insertAdjacentHTML('beforeend', lineRow({q:1, t:true})); recalc(form); }
   else if (act === 'fld-add') editField(ent);
@@ -1064,7 +1113,7 @@ document.addEventListener('keydown', e => {
   const typingIn = e.target.closest('input,textarea,select,[contenteditable]');
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's'){
     const f = $('#dlg[open] form') || $('#recform'); if (f){ e.preventDefault(); f.requestSubmit(); } return; }
-  if (e.altKey && /^[1-8]$/.test(e.key)){ e.preventDefault();
+  if (e.altKey && /^[1-9]$/.test(e.key)){ e.preventDefault();
     location.hash = ['#/', ...ENTS.map(x => '#/list/' + x), '#/settings'][+e.key-1]; return; }
   if (typingIn || e.ctrlKey || e.metaKey || e.altKey || $('#dlg[open]')) return;
   const {parts} = parseHash();
@@ -1082,6 +1131,7 @@ document.addEventListener('keydown', e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.dataset.in === 'search'){ ui.q[t.dataset.ent] = t.value; fillRows(t.dataset.ent); }
+  if (t.matches('.lines .li-d')) applyService(t.closest('tr'));
   const form = t.closest('#recform'); if (form && (t.closest('.lines') || t.name === 'f_tax_rate' || t.name === 'f_amount_paid')) recalc(form);
 });
 document.addEventListener('change', e => {
