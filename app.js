@@ -1076,13 +1076,13 @@ function printTicket(id){
   const S = db.settings; const c = find('customers', r.data.customer); const a = find('assets', r.data.asset);
   const rows = sch('tickets').fields.filter(f => f.type!=='relation' && r.data[f.id] !== undefined && r.data[f.id] !== '')
     .map(f => `<tr><th>${h(f.label)}</th><td style="white-space:pre-wrap">${h(fmt(f, r.data[f.id]))}</td></tr>`).join('');
-  $('#print').innerHTML = `<h1>${h(S.shopName)}</h1><p>${h(S.shopLine)}</p>
+  $('#print').innerHTML = `<div style="display:flex;align-items:center;gap:12pt"><img src="logo.png" alt="" class="logo"><div><h1>${h(S.shopName)}</h1><p>${h(S.shopLine)}</p></div></div>
     <h2 style="font-size:14pt">Work order ${h(tagOf('tickets',r))}</h2>
     <table><tr><th>Customer</th><td>${c ? h(label('customers',c)) + '<br>' + h([fmt({type:'phone'}, c.data.phone), c.data.email].filter(Boolean).join('  |  ')) : ''}</td></tr>
     <tr><th>Device</th><td>${a ? h(label('assets',a)) + (a.data.serial ? '<br>S/N ' + h(a.data.serial) : '') : ''}</td></tr>${rows}</table>
     <p style="margin-top:14pt;font-size:9.5pt">${h(S.terms)}</p>
     <div class="sig"><div>Customer signature</div><div>Date</div><div>Technician</div></div>`;
-  window.print();
+  printWhenReady();
 }
 
 /* ---------- events ---------- */
