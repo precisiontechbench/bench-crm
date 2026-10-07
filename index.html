@@ -184,6 +184,17 @@ body.locked .app{grid-template-columns:1fr} body.locked .rail{display:none}
 .lines .li-a{font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink)}
 input.calc{background:var(--sunk); font-weight:600; font-variant-numeric:tabular-nums}
 #print table.items th{width:auto}
+.pnlwrap{overflow-x:auto; padding:.25rem .75rem}
+table.pnl{width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums}
+table.pnl th{text-align:right; font:600 .8rem/1.2 'Barlow',sans-serif; color:var(--muted); padding:.5rem .6rem; white-space:nowrap}
+table.pnl th:first-child,table.pnl td:first-child{text-align:left; white-space:normal; min-width:13rem}
+table.pnl td{text-align:right; padding:.35rem .6rem; white-space:nowrap}
+table.pnl tr.hd td{text-align:left; font-weight:600; padding-top:.9rem; color:var(--muted)}
+table.pnl tr.ind td:first-child{padding-left:1.5rem}
+table.pnl tr.sum td{border-top:1px solid var(--line); font-weight:600}
+table.pnl tr.total td{border-top:2px solid var(--ink); font-weight:700; font-size:1.05em}
+table.pnl tr.memo td{color:var(--muted); font-size:.9em}
+table.pnl .neg{color:var(--danger)}
 @media (max-width:860px){
   .record{grid-template-columns:1fr}
 }
@@ -214,6 +225,10 @@ input.calc{background:var(--sunk); font-weight:600; font-variant-numeric:tabular
   #print h1{font-size:18pt} #print img.logo{height:72pt; width:auto} #print table{width:100%; border-collapse:collapse}
   #print td,#print th{border:1px solid #999; padding:4pt 6pt; text-align:left; vertical-align:top}
   #print th{width:28%; background:#eee}
+  #print table.pnl{font-size:9.5pt} #print table.pnl th{width:auto; text-align:right} #print table.pnl th:first-child{text-align:left}
+  #print table.pnl td,#print table.pnl th{border:0; padding:2pt 5pt}
+  #print table.pnl tr.sum td{border-top:1px solid #666} #print table.pnl tr.total td{border-top:2px solid #000}
+  #print table.pnl .neg{color:#000}
   #print .sig{margin-top:28pt; display:flex; gap:24pt} #print .sig div{flex:1; border-top:1px solid #000; padding-top:3pt}
 }
 </style>

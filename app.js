@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 const KEY = 'ptb-bench-crm';
-const ENTS = ['customers','assets','tickets','estimates','invoices','services','followups'];
+const ENTS = ['customers','assets','tickets','estimates','invoices','services','expenses','followups'];
 const $ = (s, el=document) => el.querySelector(s);
 const $$ = (s, el=document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -94,6 +94,18 @@ const DEFAULT_SCHEMA = {
     F('taxable','Tax','select',{list:true,locked:true,default:'Taxable',options:['Taxable','Non-taxable'],hint:'Sets the Tax box when you add this service to an estimate or invoice.'}),
     F('status','Status','select',{list:true,locked:true,default:'Active',options:['Active','Retired'],hint:'Retired services stay on old invoices but are no longer suggested.'}),
     F('description','Description','textarea')]},
+  expenses:{label:'Expenses', singular:'Expense', prefix:'EXP', fields:[
+    F('vendor','Vendor','text',{required:true,list:true,title:true,locked:true}),
+    F('description','What it was for','text',{list:true,title:true}),
+    F('date','Date','date',{required:true,list:true,locked:true,default:'today'}),
+    F('category','Category','select',{required:true,list:true,locked:true,options:['Parts & inventory','Tools & equipment','Software & subscriptions','Shipping & freight','Advertising & marketing','Rent & utilities','Phone & internet','Insurance','Vehicle & fuel','Office supplies','Professional services','Licenses & fees','Training','Meals','Taxes','Other'],hint:'Parts & inventory counts as cost of goods on the Profit & Loss report (change that in Settings).'}),
+    F('amount','Amount','currency',{required:true,list:true,locked:true,hint:'The total you paid, including any sales tax.'}),
+    F('payment_method','Paid with','select',{list:true,options:['Card','Cash','Check','Bank transfer','Zelle','Venmo','Other']}),
+    F('reference','Receipt or order number','text'),
+    F('ticket','Billable to ticket','relation',{target:'tickets',locked:true,hint:'Optional. Links a part or cost to the job it was bought for.'}),
+    F('recurring','Repeats','select',{options:['Monthly','Quarterly','Yearly'],hint:'A label only. Add each bill as it comes.'}),
+    F('receipt','Receipt link','url'),
+    F('notes','Notes','textarea')]},
   followups:{label:'Follow-ups', singular:'Follow-up', prefix:'F', fields:[
     F('subject','Subject','text',{required:true,list:true,title:true}),
     F('customer','Customer','relation',{target:'customers',list:true,locked:true}),
@@ -113,6 +125,7 @@ const ICON = {
   estimates:'<rect x="5" y="4" width="14" height="17" rx="1.5"/><path d="M9 4V2.5h6V4M8.5 10h7M8.5 14h4.5"/>',
   invoices:'<path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
   services:'<path d="M3.5 3.5h8l9 9-8 8-9-9z"/><circle cx="8" cy="8" r="1.5"/>',
+  expenses:'<rect x="3" y="6" width="18" height="12" rx="1.5"/><circle cx="12" cy="12" r="2.5"/><path d="M6.5 9.5h0M17.5 14.5h0"/>',
   settings:'<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>'
 };
 const icon = k => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[k]||''}</svg>`;
@@ -120,12 +133,12 @@ const icon = k => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[
 /* ---------- storage ---------- */
 function freshDb(){
   return { v:1, schema:clone(DEFAULT_SCHEMA),
-    records:{customers:[],assets:[],tickets:[],estimates:[],invoices:[],services:[],followups:[]},
-    counters:{customers:1000,assets:1000,tickets:1000,estimates:1000,invoices:1000,services:1000,followups:1000},
+    records:{customers:[],assets:[],tickets:[],estimates:[],invoices:[],services:[],expenses:[],followups:[]},
+    counters:{customers:1000,assets:1000,tickets:1000,estimates:1000,invoices:1000,services:1000,expenses:1000,followups:1000},
     meta:{updated:0, configUpdated:0, mig:['phone_mobile','fu_invoice','inv_terms']},
     settings:{ shopName:'Precision Tech Bench', shopLine:'439 Main Street, Carrollton, KY 41008',
       terms:'Please back up your data. We are not responsible for data loss during repair. Devices not picked up within 30 days of notice may be recycled.',
-      closed:['Closed'], done:['Done'], estDone:['Declined','Expired','Converted'], invDone:['Paid','Closed','Void'], svcDone:['Retired'],
+      closed:['Closed'], done:['Done'], estDone:['Declined','Expired','Converted'], invDone:['Paid','Closed','Void'], svcDone:['Retired'], cogsCats:['Parts & inventory'],
       followTrigger:['Paid','Closed'], fuEnabled:true, fuDays:14, fuMonths:2, invoiceNote:'Thank you for choosing Precision Tech Bench!',
       leadsUrl:'', leadsKey:'', imported:[], lastSync:'', lastBackup:'', autoLock:30 } };
 }
@@ -156,6 +169,7 @@ function fmt(f, v, depth=0){
 const DONE_KEY = {tickets:'closed', followups:'done', estimates:'estDone', invoices:'invDone', services:'svcDone'};
 const isClosed = (ent,r) => DONE_KEY[ent] ? (db.settings[DONE_KEY[ent]] || []).includes(r.data.status) : false;
 const round2 = n => Math.round((+n || 0) * 100) / 100;
+const money = v => { const n = round2(v); return (n < 0 ? '-' : '') + '$' + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); };
 function shiftDate(iso, {days=0, months=0}){
   const [y,m,d] = String(iso).split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1 + months, 1));
@@ -512,6 +526,7 @@ function route(){
   else if (view==='rec' && ENTS.includes(ent)) { renderRail(ent); V.innerHTML = viewRecord(ent, id); afterForm(); }
   else if (view==='fields') { const e = ENTS.includes(ent) ? ent : 'customers'; renderRail('settings'); V.innerHTML = viewFields(e); }
   else if (view==='settings') { renderRail('settings'); V.innerHTML = viewSettings(); }
+  else if (view==='pnl') { renderRail('expenses'); V.innerHTML = viewPnl(); fillPnl(); }
   else { renderRail('bench'); V.innerHTML = viewBench(); }
   window.scrollTo(0,0);
 }
@@ -555,15 +570,16 @@ function viewBench(){
 
 /* ---------- lists ---------- */
 const ui = { q:{}, sort:{}, filter:{ tickets:'__open', followups:'__open', services:'__open' } };
+ui.sort.expenses = {k:'date', dir:-1};
 function viewList(ent){
   const sc = sch(ent); const cols = sc.fields.filter(f => f.list);
-  const sf = sc.fields.find(f => f.id==='status' && f.type==='select');
+  const sf = sc.fields.find(f => f.id==='status' && f.type==='select') || (ent === 'expenses' ? fld('expenses','category') : null);
   const s = ui.sort[ent] || {k:'no', dir:-1};
   const fv = ui.filter[ent] || '';
-  return `<div class="head"><div><h1>${h(sc.label)}</h1><p>${db.records[ent].length} total</p></div>
+  return `${ent === 'expenses' ? expTabs('list') : ''}<div class="head"><div><h1>${h(sc.label)}</h1><p>${db.records[ent].length} total<span id="rowsum"></span></p></div>
     <div class="row">${ent === 'services' ? `<button class="btn small" data-act="csv" data-ent="services">Export CSV</button><button class="btn small" data-act="print-prices">Print price list</button>` : ''}<a class="btn small" href="#/fields/${ent}">Edit fields</a><a class="btn primary" href="#/new/${ent}">New ${h(sc.singular.toLowerCase())}</a></div></div>
     <div class="toolbar"><input type="search" placeholder="Search ${h(sc.label.toLowerCase())}" aria-label="Search" data-in="search" data-ent="${ent}" value="${h(ui.q[ent]||'')}">
-    ${sf ? `<select data-in="filter" data-ent="${ent}" aria-label="Filter by status"><option value="">All statuses</option>
+    ${sf ? `<select data-in="filter" data-ent="${ent}" aria-label="Filter"><option value=""></option>
       ${DONE_KEY[ent] ? `<option value="__open" ${fv==='__open'?'selected':''}>${ent === 'services' ? 'Active only' : 'Open only'}</option>` : ''}
       ${sf.options.map(o => `<option ${fv===o?'selected':''}>${h(o)}</option>`).join('')}</select>` : ''}</div>
     <div class="tablewrap"><table class="grid"><thead><tr>
@@ -577,7 +593,7 @@ function fillRows(ent){
   const q = (ui.q[ent]||'').toLowerCase().trim();
   if (q) rows = rows.filter(r => (tagOf(ent,r) + ' ' + sc.fields.map(f => fmt(f, r.data[f.id])).join(' ') + ' ' + digits(r.data.phone)).toLowerCase().includes(q));
   const fv = ui.filter[ent];
-  if (fv === '__open') rows = rows.filter(r => !isClosed(ent, r)); else if (fv) rows = rows.filter(r => r.data.status === fv);
+  if (fv === '__open') rows = rows.filter(r => !isClosed(ent, r)); else if (fv) rows = rows.filter(r => r.data[ent === 'expenses' ? 'category' : 'status'] === fv);
   const s = ui.sort[ent] || {k:'no', dir:-1};
   const f = fld(ent, s.k);
   rows.sort((a,b) => {
@@ -588,6 +604,7 @@ function fillRows(ent){
     else { x = fmt(f||{}, a.data[s.k]).toLowerCase(); y = fmt(f||{}, b.data[s.k]).toLowerCase(); }
     return (x > y ? 1 : x < y ? -1 : 0) * s.dir;
   });
+  const sum = $('#rowsum'); if (sum) sum.textContent = ent === 'expenses' && rows.length ? ` · showing ${rows.length} totaling ${money(rows.reduce((a,r) => a + (+r.data.amount || 0), 0))}` : '';
   const tb = $('#rows'); if (!tb) return;
   tb.innerHTML = rows.length ? rows.map(r => `<tr data-href="#/rec/${ent}/${r.id}" tabindex="0">
       <td><span class="tag">${h(tagOf(ent,r))}</span></td>
@@ -901,6 +918,8 @@ ${[['estimates','estDone','Finished estimate statuses'],['invoices','invDone','F
           return sf ? `<fieldset class="f" style="border:0;padding:0;margin:0"><legend>${lab}</legend>${sf.options.map(o => `<label class="f chk" style="padding-top:.3rem"><input type="checkbox" data-in="statusset" data-k="${k}" value="${h(o)}" ${(S[k]||[]).includes(o)?'checked':''}>${h(o)}</label>`).join('')}</fieldset>` : ''; }).join('')}
         <fieldset class="f" style="border:0;padding:0;margin:0"><legend>Done follow-up statuses</legend>${fs ? fs.options.map(o => `<label class="f chk" style="padding-top:.3rem"><input type="checkbox" data-in="statusset" data-k="done" value="${h(o)}" ${S.done.includes(o)?'checked':''}>${h(o)}</label>`).join('') : ''}</fieldset>
       </div></section>
+    <section class="panel"><h2>Profit &amp; Loss</h2><p>Expense categories counted as cost of goods (things you buy to resell or install). The report lists them above gross profit.</p>
+      <div class="row">${(fld('expenses','category')?.options || []).map(o => `<label class="f chk" style="padding-top:.3rem"><input type="checkbox" data-in="statusset" data-k="cogsCats" value="${h(o)}" ${(S.cogsCats||[]).includes(o)?'checked':''}>${h(o)}</label>`).join('')}</div></section>
     <section class="panel"><h2>Follow-ups after payment</h2><p>When an invoice moves to one of these statuses, two check-in follow-ups are created for that customer, counted from the invoice's service date. This happens once per invoice. Cell numbers get a Text follow-up; others get a Call.</p>
       <div class="formgrid">
         <label class="f chk" style="padding-top:0"><input type="checkbox" data-in="settingchk" data-k="fuEnabled" ${S.fuEnabled?'checked':''}>Create follow-ups automatically</label>
@@ -949,8 +968,128 @@ function sample(){
   db.records.invoices.slice(-1).forEach(r => computeTotals('invoices', r.data));
   for (const [item, category, price, unit, taxable] of [['Diagnostic fee','Diagnostics',49,'Flat rate','Non-taxable'],['Virus and malware removal','Virus / malware',95,'Flat rate','Taxable'],['Bench labor','Labor',65,'Hour','Taxable'],['Data transfer','Data recovery',75,'Flat rate','Taxable']])
     createRecord('services', {item, category, price, unit, taxable, status:'Active'});
+  for (const [vendor, description, category, amount, payment_method] of [['Newegg','1 TB SSD for the Carroll County drive','Parts & inventory',79.99,'Card'],['Adobe','Monthly subscription','Software & subscriptions',22.99,'Card'],['Comcast Business','Shop internet','Phone & internet',89,'Bank transfer'],['Google Ads','Local search ads','Advertising & marketing',120,'Card']])
+    createRecord('expenses', {vendor, description, category, amount, payment_method, date:today()});
   createRecord('followups', {subject:'Call Martha with diagnosis', customer:c1.id, ticket:t1.id, method:'Call', due:today(), status:'Pending'});
   save(); toast('Sample records added'); location.hash = '#/';
+}
+
+/* ---------- profit & loss ---------- */
+const expTabs = cur => `<nav class="tabs" aria-label="Expenses"><a href="#/list/expenses" ${cur==='list'?'aria-current="page"':''}>Expenses</a><a href="#/pnl" ${cur==='pnl'?'aria-current="page"':''}>Profit &amp; Loss</a></nav>`;
+const pnl = { preset:'ytd', from:'', to:'', basis:'cash', monthly:false };
+function pnlRange(){
+  const t = today(), y = t.slice(0,4), m = +t.slice(5,7);
+  const ms = (yy, mm) => `${yy}-${String(mm).padStart(2,'0')}-01`;
+  const monthEnd = iso => shiftDate(iso, {months:1, days:-1});
+  const qs = ms(y, 3 * Math.floor((m - 1) / 3) + 1);
+  switch (pnl.preset){
+    case 'month': return [ms(y,m), monthEnd(ms(y,m))];
+    case 'lastmonth': { const s = shiftDate(ms(y,m), {months:-1}); return [s, monthEnd(s)]; }
+    case 'quarter': return [qs, shiftDate(qs, {months:3, days:-1})];
+    case 'lastquarter': { const s = shiftDate(qs, {months:-3}); return [s, shiftDate(s, {months:3, days:-1})]; }
+    case 'ytd': return [`${y}-01-01`, t];
+    case 'last12': return [shiftDate(t, {months:-12, days:1}), t];
+    case 'lastyear': return [`${+y - 1}-01-01`, `${+y - 1}-12-31`];
+    default: return [pnl.from || `${y}-01-01`, pnl.to || t];
+  }
+}
+// Revenue excludes sales tax. Cash basis counts the paid share of each invoice on the day it was paid; accrual counts the whole invoice on its issue date.
+function pnlPeriod(from, to){
+  const inR = d => d && d >= from && d <= to;
+  let rev = 0, tax = 0, nInv = 0;
+  for (const r of db.records.invoices){
+    const D = r.data; if (D.status === 'Void') continue;
+    const total = +D.total || 0; let share, date;
+    if (pnl.basis === 'cash'){ const paid = +D.amount_paid || 0; if (paid <= 0) continue; date = D.paid_date || D.date_issued; share = total > 0 ? Math.min(1, paid / total) : 1; }
+    else { if (D.status === 'Draft') continue; date = D.date_issued; share = 1; }
+    if (!inR(date)) continue;
+    rev += (+D.subtotal || 0) * share; tax += (+D.tax || 0) * share; nInv++;
+  }
+  const cogsCats = db.settings.cogsCats || [], cogsBy = {}, cats = {}; let nExp = 0;
+  for (const r of db.records.expenses){
+    const D = r.data; if (!inR(D.date)) continue;
+    const a = +D.amount || 0, c = D.category || 'Uncategorized'; nExp++;
+    (cogsCats.includes(c) ? cogsBy : cats)[c] = ((cogsCats.includes(c) ? cogsBy : cats)[c] || 0) + a;
+  }
+  const sum = o => round2(Object.values(o).reduce((a,b) => a + b, 0));
+  rev = round2(rev); tax = round2(tax);
+  const cogs = sum(cogsBy), opex = sum(cats);
+  return {rev, tax, cogs, cogsBy, cats, opex, gross:round2(rev - cogs), net:round2(rev - cogs - opex), nInv, nExp};
+}
+function pnlColumns(from, to){
+  if (!pnl.monthly) return [{label:'Total', from, to}];
+  const cols = []; let s = from;
+  while (s <= to && cols.length < 60){
+    const first = s.slice(0,7) + '-01', end = shiftDate(first, {months:1, days:-1});
+    cols.push({label:new Date(s + 'T00:00:00').toLocaleDateString('en-US', {month:'short', year:'2-digit'}), from:s, to:end < to ? end : to});
+    s = shiftDate(first, {months:1});
+  }
+  return cols.length > 1 ? [...cols, {label:'Total', from, to}] : [{label:'Total', from, to}];
+}
+function pnlReport(){
+  const [from, to] = pnlRange(); if (from > to) return {from, to, bad:true};
+  const cols = pnlColumns(from, to).map(c => ({...c, ...pnlPeriod(c.from, c.to)}));
+  const names = k => [...new Set(cols.flatMap(c => Object.keys(c[k])))].sort((a,b) => a.localeCompare(b));
+  return {from, to, cols, cogsNames:names('cogsBy'), catNames:names('cats')};
+}
+function pnlRows(R){
+  const row = (label, f, cls='') => ({label, cls, v:R.cols.map(f)});
+  const rows = [row('Revenue (before sales tax)', c => c.rev, 'sum')];
+  if (R.cogsNames.length){
+    rows.push({label:'Cost of goods', cls:'hd', v:[]}, ...R.cogsNames.map(n => row(n, c => c.cogsBy[n] || 0, 'ind')), row('Total cost of goods', c => c.cogs, 'sum'));
+  }
+  rows.push(row('Gross profit', c => c.gross, 'total'));
+  rows.push({label:'Operating expenses', cls:'hd', v:[]}, ...R.catNames.map(n => row(n, c => c.cats[n] || 0, 'ind')), row('Total operating expenses', c => c.opex, 'sum'));
+  rows.push(row('Net profit', c => c.net, 'total'));
+  rows.push({...row('Profit margin', c => c.rev ? c.net / c.rev * 100 : null, 'memo'), pct:true});
+  rows.push(row('Sales tax collected (not counted as revenue)', c => c.tax, 'memo'));
+  return rows;
+}
+function pnlTable(R){
+  const cell = (r, v) => r.pct ? (v === null ? '' : v.toFixed(1) + '%') : `<span class="${r.cls === 'total' && v < 0 ? 'neg' : ''}">${money(v)}</span>`;
+  return `<table class="pnl"><thead><tr><th></th>${R.cols.map(c => `<th>${h(c.label)}</th>`).join('')}</tr></thead><tbody>
+    ${pnlRows(R).map(r => r.cls === 'hd' ? `<tr class="hd"><td colspan="${R.cols.length + 1}">${h(r.label)}</td></tr>`
+      : `<tr class="${r.cls}"><td>${h(r.label)}</td>${r.v.map(v => `<td>${cell(r, v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+function viewPnl(){
+  const [from, to] = pnlRange();
+  const presets = [['month','This month'],['lastmonth','Last month'],['quarter','This quarter'],['lastquarter','Last quarter'],['ytd','Year to date'],['last12','Last 12 months'],['lastyear','Last year'],['custom','Custom dates']];
+  return `${expTabs('pnl')}<div class="head"><div><h1>Profit &amp; Loss</h1><p>Invoice revenue minus what you spent, for any period.</p></div>
+    <div class="row"><button class="btn small" data-act="pnl-csv">Export CSV</button><button class="btn small" data-act="pnl-print">Print report</button></div></div>
+    <div class="panel" style="padding:1rem;margin-bottom:1rem"><div class="formgrid">
+      <label class="f">Period<select data-in="pnl" data-k="preset">${presets.map(([v,l]) => `<option value="${v}" ${pnl.preset===v?'selected':''}>${l}</option>`).join('')}</select></label>
+      <label class="f">From<input type="date" data-in="pnl" data-k="from" value="${h(from)}"></label>
+      <label class="f">To<input type="date" data-in="pnl" data-k="to" value="${h(to)}"></label>
+      <label class="f">Basis<select data-in="pnl" data-k="basis"><option value="cash" ${pnl.basis==='cash'?'selected':''}>Cash (money received)</option><option value="accrual" ${pnl.basis==='accrual'?'selected':''}>Accrual (invoices issued)</option></select></label>
+      <label class="f chk"><input type="checkbox" data-in="pnl" data-k="monthly" ${pnl.monthly?'checked':''}>Show each month in its own column</label>
+    </div></div><div id="pnlout"></div>`;
+}
+function fillPnl(){
+  const out = $('#pnlout'); if (!out) return;
+  const R = pnlReport();
+  if (R.bad){ out.innerHTML = '<div class="panel empty">The start date is after the end date.</div>'; return; }
+  const T = R.cols[R.cols.length - 1], plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  out.innerHTML = `<div class="stats"><div><b>${money(T.rev)}</b>revenue</div><div><b>${money(T.cogs + T.opex)}</b>expenses</div>
+      <div><b style="color:${T.net < 0 ? 'var(--danger)' : 'var(--ok)'}">${money(T.net)}</b>net ${T.net < 0 ? 'loss' : 'profit'}</div><div><b>${T.rev ? (T.net / T.rev * 100).toFixed(1) + '%' : '-'}</b>margin</div></div>
+    <div class="panel pnlwrap">${pnlTable(R)}</div>
+    <p class="meta" style="margin-top:.8rem">${plural(T.nInv, 'invoice')} and ${plural(T.nExp, 'expense')} in this period. ${pnl.basis === 'cash'
+      ? 'Cash basis: counts money actually received, on the day it was paid. A partly paid invoice counts only the paid part.'
+      : 'Accrual basis: counts each invoice on its issue date whether or not it is paid. Drafts and voided invoices are left out.'} Sales tax is not income, so it is left out of revenue.</p>`;
+}
+function printPnl(){
+  const R = pnlReport(); if (R.bad){ toast('The start date is after the end date.'); return; }
+  const S = db.settings, d = x => h(fmt({type:'date'}, x));
+  $('#print').innerHTML = `<div style="display:flex;justify-content:space-between;gap:24pt"><div style="display:flex;align-items:center;gap:12pt"><img src="logo.png" alt="" class="logo"><div><h1>${h(S.shopName)}</h1><p>${h(S.shopLine)}</p></div></div>
+      <div style="text-align:right"><h2 style="font-size:16pt;margin:0">PROFIT &amp; LOSS</h2><p style="margin:.2em 0">${d(R.from)} to ${d(R.to)}</p><p style="margin:0">${pnl.basis === 'cash' ? 'Cash basis' : 'Accrual basis'}</p></div></div>
+    <div style="margin-top:12pt">${pnlTable(R)}</div>`;
+  printWhenReady();
+}
+function pnlCsv(){
+  const R = pnlReport(); if (R.bad){ toast('The start date is after the end date.'); return; }
+  const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
+  const lines = [[db.settings.shopName], ['Profit & Loss', `${R.from} to ${R.to}`, pnl.basis === 'cash' ? 'Cash basis' : 'Accrual basis'], [], ['', ...R.cols.map(c => c.label)]];
+  for (const r of pnlRows(R)) lines.push(r.cls === 'hd' ? [r.label] : [r.label, ...r.v.map(v => v === null ? '' : r.pct ? v.toFixed(1) + '%' : (+v).toFixed(2))]);
+  download(`profit-loss-${R.from}-to-${R.to}.csv`, lines.map(l => l.map(q).join(',')).join('\r\n'), 'text/csv');
 }
 
 /* ---------- web leads ---------- */
@@ -1098,6 +1237,8 @@ document.addEventListener('click', e => {
   else if (act === 'print-doc') printDoc(ent, t.dataset.id);
   else if (act === 'email-doc') emailDoc(ent, t.dataset.id);
   else if (act === 'print-prices') printPrices();
+  else if (act === 'pnl-print') printPnl();
+  else if (act === 'pnl-csv') pnlCsv();
   else if (act === 'est-to-inv') estimateToInvoice(t.dataset.id);
   else if (act === 'copy-inv') copyInvoice(t.dataset.id);
   else if (act === 'line-add'){ const tb = $('tbody', t.closest('.lines')); tb.insertAdjacentHTML('beforeend', lineRow({q:1, t:true})); $('tr:last-child .li-d', tb).focus(); }
@@ -1158,6 +1299,12 @@ document.addEventListener('change', e => {
   const t = e.target, k = t.dataset.k;
   switch (t.dataset.in){
     case 'filter': ui.filter[t.dataset.ent] = t.value; fillRows(t.dataset.ent); break;
+    case 'pnl': {
+      if (k === 'monthly') pnl.monthly = t.checked;
+      else if (k === 'basis') pnl.basis = t.value;
+      else if (k === 'preset'){ const cur = pnlRange(); pnl.preset = t.value; if (t.value === 'custom'){ pnl.from = cur[0]; pnl.to = cur[1]; } else { [pnl.from, pnl.to] = pnlRange(); } }
+      else { if (pnl.preset !== 'custom'){ [pnl.from, pnl.to] = pnlRange(); pnl.preset = 'custom'; } pnl[k] = t.value; }
+      route(); break; }
     case 'terms': { const form = t.closest('form'); if (form) setDueFromTerms(form); break; }
     case 'rel': { const form = t.closest('form'); autoFillFrom(form, t); refilter(form); break; }
     case 'ftype': toggleTypeRows($('#dlg'), t.value); break;
