@@ -26,6 +26,24 @@ Expenses has four tabs: **Ledger**, **Scan receipts**, **Needs review**, **Profi
 
 **Profit & Loss** counts only Posted expenses for the first business in the list (Precision Tech Bench), because it is built from this shop's invoices.
 
+## Invoices and the AI invoice scanner
+
+Invoices has three tabs: **All invoices**, **Scan invoices**, **Needs review**. Use it to bring paid invoices over from QuickBooks Online (or anywhere else) as PDFs. It uses the same Anthropic key, model, PDF storage and review screen as the receipt scanner.
+
+**What gets read.** Customer (bill to), invoice number, date, terms and due date, every line (description, quantity, price, taxable or not), subtotal, sales tax, tax rate, total, amount paid, balance, payment date and method, and the memo. The figures are stored exactly as printed on the PDF; they are only recalculated if you change a line or the tax rate in review.
+
+**Posting rules.** An invoice is posted automatically, with status **Closed**, only when confidence is at least 85%, it shows a customer, date and total, it is fully paid (a PAID stamp or a zero balance), it is not a duplicate, subtotal plus tax equals the total, the lines add up to the subtotal, and it is a real invoice (not a credit memo, estimate or voided invoice). Anything else, including **invoices with a balance still due**, goes to **Needs review** with the reasons listed.
+
+**Customers.** The bill-to name is matched to your customers by email or by name (ignoring case, punctuation and words like LLC or Inc). A match is linked. A name that is only a near match (for example "Jane M Doe" against "Jane Doe") is never guessed: the invoice goes to review so you pick the right customer. A customer that is not in your list is added automatically, but only by an invoice that posts cleanly. In review, leave the customer blank to add the one on the PDF as a new customer when you approve.
+
+**Duplicates** (the same original invoice number, or the same customer, date and total) are never posted silently. Scanning the exact same file twice is caught by its hash before any API call is made.
+
+**What imported invoices do not do.** They never start the automatic follow-up reminders, even if you later edit and save them. Needs Review invoices are left out of the unpaid total, the Profit & Loss report and the dashboard figures until you approve them. Each invoice keeps the original invoice number in **Original invoice number**; the CRM still gives it its own INV number.
+
+**PDF storage.** Each original PDF is encrypted with the same data key and saved as `<data folder>/invoices/<id>.pdf.enc` in the private data repository, linked from the invoice (View PDF). Rejecting a row keeps the PDF file, since these are business records.
+
+**Tips for a big import.** Files are scanned one at a time and every PDF is sent to Anthropic, so a large import takes a while and uses your API credit. A PDF holding many invoices is fine (up to 40 per file; split it if the scanner says it is too big). Start with a small batch to check the results, and keep the monthly spend limit on the key.
+
 ## Setup
 
 1. Deploy as before (GitHub Pages) and sign in. No change to `config.js` is needed.
@@ -45,6 +63,8 @@ Expenses has four tabs: **Ledger**, **Scan receipts**, **Needs review**, **Profi
 `connect-src` now also allows `https://api.anthropic.com` and nothing else new. The PDF viewer needs `frame-src blob:` so the browser can show the decrypted PDF in an iframe; it only allows frames from blob URLs this page created.
 
 ## Tests
+
+`tests/invoices.test.js` does the same for the invoice scanner: auto-post and review rules, customer matching and creation, duplicates, encrypted PDF storage, no follow-ups, review edits and approval, Profit & Loss, and upgrading an older data file. Run it with `node invoices.test.js`.
 
 `tests/expenses.test.js` drives the real app in Chromium with GitHub and Anthropic both mocked (a stateful fake repository, including 409 conflicts and size rejections, and per-file fake AI replies including a 429 and a fenced reply). It uses a throwaway vault, so `config.js` is untouched. It covers sign-in, key storage, scanning, posting rules, duplicates, learning, review, PDF storage and viewing, ledger filters, CSV export, merge on conflict, and keyboard shortcuts, and writes screenshots to `tests/screenshots/`.
 
