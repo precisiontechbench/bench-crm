@@ -1572,7 +1572,7 @@ function reviewReject(id){
   tombstone([id]); db.records.expenses = db.records.expenses.filter(x => x.id !== id); save(); toast('Rejected');
   location.hash = left.length ? `#/expenses/review/${(left.find(x => x.no > r.no) || left[0]).id}` : '#/expenses/review';
 }
-/* ---------- invoice scanner: paid invoices (QuickBooks or any other system) become Paid invoice records ---------- */
+/* ---------- invoice scanner: paid invoices (QuickBooks or any other system) become Closed invoice records ---------- */
 const pendingInv = () => db.records.invoices.filter(r => r.data.status === 'Needs Review').sort((a,b) => a.no - b.no);
 const invTabs = cur => {
   const n = db ? pendingInv().length : 0;
@@ -1648,7 +1648,7 @@ function normalizeInvoices(json){
     return n;
   });
 }
-// Auto-post only a fully paid invoice with nothing at all for a person to check. Every reason it did not goes on the row as a flag.
+// Auto-post (as Closed) only a fully paid invoice with nothing at all for a person to check. Every reason it did not goes on the row as a flag.
 function postInvoice(n, ctx){
   const flags = [], total = n.total;
   if (n.type && !['invoice', 'sales_receipt'].includes(n.type)) flags.push(`This looks like a ${n.type.replace(/_/g, ' ')}, not an invoice`);
@@ -1670,7 +1670,7 @@ function postInvoice(n, ctx){
   if (ctx.pdfErr) flags.push('PDF not saved: ' + ctx.pdfErr);
   let cust = m.hit;
   if (!cust && !flags.length && n.cust.name) cust = createCustFromScan(n.cust);   // only a clean invoice creates a customer on its own
-  const d = {}, status = flags.length ? 'Needs Review' : 'Paid';
+  const d = {}, status = flags.length ? 'Needs Review' : 'Closed';
   const amountPaid = paid ? (n.paidAmt !== null ? n.paidAmt : total) : n.paidAmt;
   setIf('invoices', d, 'customer', cust && cust.id); setIf('invoices', d, 'reference', n.ref); setIf('invoices', d, 'status', status);
   setIf('invoices', d, 'date_issued', n.date); setIf('invoices', d, 'terms', n.terms); setIf('invoices', d, 'due', n.due || dueFrom(n.date, n.terms));
@@ -1693,7 +1693,7 @@ function viewScanInv(){
     <div class="dropzone" id="dz" data-kind="invoices"><p><b>Drop PDFs here</b><br><span class="meta">One or many. Multi-page and multi-invoice PDFs and scans are fine. Up to ${fmtSize(MAX_PDF)} each.</span></p>
       <button class="btn primary" type="button" data-act="scan-pick">Choose PDFs</button><input type="file" id="scanfiles" data-in="scanfiles" data-kind="invoices" accept="application/pdf,.pdf" multiple hidden></div>
     <ul class="scanlist" id="scanlist"></ul>
-    <div class="panel" style="padding:1rem;margin-top:1rem"><p style="margin:0">An invoice is posted as <b>Paid</b> automatically only when it was read with at least ${Math.round(AUTO_POST_CONF * 100)}% confidence, shows a customer, date and total, is fully paid, is not a duplicate and its figures add up. Anything else, including invoices with a balance still due, goes to <a href="#/invoices/review">Needs review</a> so you can check it against the PDF. A customer who is not in your list yet is added automatically, but only from an invoice that posts cleanly. Posted invoices count in the Profit &amp; Loss report and do not start follow-up reminders. Each PDF is sent to Anthropic to be read, then stored encrypted in your data repository.</p></div>`;
+    <div class="panel" style="padding:1rem;margin-top:1rem"><p style="margin:0">An invoice is posted as <b>Closed</b> automatically only when it was read with at least ${Math.round(AUTO_POST_CONF * 100)}% confidence, shows a customer, date and total, is fully paid, is not a duplicate and its figures add up. Anything else, including invoices with a balance still due, goes to <a href="#/invoices/review">Needs review</a> so you can check it against the PDF. A customer who is not in your list yet is added automatically, but only from an invoice that posts cleanly. Posted invoices count in the Profit &amp; Loss report and do not start follow-up reminders. Each PDF is sent to Anthropic to be read, then stored encrypted in your data repository.</p></div>`;
 }
 const INV_REVIEW_FIELDS = ['customer','reference','title','status','date_issued','terms','due','items','tax_rate','subtotal','tax','total','amount_paid','balance','paid_date','payment_method','notes'];
 function viewInvReview(id){
@@ -1747,8 +1747,8 @@ function invReviewSave(form, approve){
   }
   data.subtotal = same && r.data.subtotal !== undefined ? +r.data.subtotal : calc.subtotal;
   data.tax = same && r.data.tax !== undefined ? +r.data.tax : calc.tax; data.total = total;
-  if (approve && (!data.status || data.status === 'Needs Review')) data.status = round2(total - (+data.amount_paid || 0)) <= 0.01 ? 'Paid' : 'Sent';
-  if (data.status === 'Paid' && data.amount_paid === undefined) data.amount_paid = total;
+  if (approve && (!data.status || data.status === 'Needs Review')) data.status = round2(total - (+data.amount_paid || 0)) <= 0.01 ? 'Closed' : 'Sent';
+  if ((data.status === 'Paid' || data.status === 'Closed') && data.amount_paid === undefined && !(+total <= 0)) data.amount_paid = total;
   data.balance = round2(total - (+data.amount_paid || 0));
   for (const k of ids) if (k in data) r.data[k] = data[k]; else delete r.data[k];
   if (approve) r.ai = {...(r.ai || {}), approved:new Date().toISOString()};

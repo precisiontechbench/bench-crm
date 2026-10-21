@@ -177,10 +177,10 @@ const shot = async (page, name, fullPage = false) => {
     assert.equal(await page.getAttribute('#dz', 'data-kind'), 'invoices');
   });
 
-  await step('two paid invoices post automatically as Paid; the customer is created once and matched case-insensitively', async () => {
+  await step('two paid invoices post automatically as Closed; the customer is created once and matched case-insensitively', async () => {
     await scanFiles(['inv-paid.pdf', 'inv-paid-existing.pdf']);
     const db = storedDb(), a = inv('1001'), b = inv('1002');
-    assert.equal(a.data.status, 'Paid'); assert.equal(b.data.status, 'Paid');
+    assert.equal(a.data.status, 'Closed'); assert.equal(b.data.status, 'Closed');
     assert.equal(db.records.customers.length, 1, 'one customer, not two: ' + JSON.stringify(db.records.customers.map(c => c.data.name)));
     assert.equal(a.data.customer, b.data.customer); assert.equal(custName(a.data.customer), 'Jane Doe');
     const c = db.records.customers[0].data; assert.equal(c.email, 'jane@example.com'); assert.equal(c.phone, '502-555-0101');
@@ -211,7 +211,7 @@ const shot = async (page, name, fullPage = false) => {
     await go('#/rec/invoices/' + inv('1001').id); await page.waitForSelector('#recform');
     assert.ok(await page.$('#f_pdf'), 'the Source PDF field shows on an invoice that has one');
     await page.fill('#f_notes', 'Edited by hand'); await page.click('#recform button[type=submit]'); await settle();
-    db = storedDb(); assert.equal(db.records.followups.length, 0); assert.equal(inv('1001').data.notes, 'Edited by hand'); assert.equal(inv('1001').data.status, 'Paid');
+    db = storedDb(); assert.equal(db.records.followups.length, 0); assert.equal(inv('1001').data.notes, 'Edited by hand'); assert.equal(inv('1001').data.status, 'Closed');
   });
 
   await step('unpaid, duplicate-number, near-match customer and a bad total all go to review; a customer is only created by a clean invoice', async () => {
@@ -222,7 +222,7 @@ const shot = async (page, name, fullPage = false) => {
     assert.equal(un.data.customer, undefined, 'a review row does not create its customer yet'); assert.equal(un.data.balance, 265);
     assert.equal(dup.data.status, 'Needs Review'); assert.ok(dup.ai.flags.some(f => /Possible duplicate of INV-/.test(f)));
     assert.equal(near.data.status, 'Needs Review'); assert.ok(near.ai.flags.some(f => /close to the existing customer .*Jane Doe/.test(f))); assert.equal(near.data.customer, undefined);
-    assert.equal(ok.data.status, 'Paid'); assert.equal(custName(ok.data.customer), 'Carroll Diner');
+    assert.equal(ok.data.status, 'Closed'); assert.equal(custName(ok.data.customer), 'Carroll Diner');
     assert.equal(bad.data.status, 'Needs Review'); assert.ok(bad.ai.flags.some(f => /Subtotal plus tax does not equal the total/.test(f)));
     assert.equal(custName(bad.data.customer), 'Carroll Diner', 'a known customer is linked even on a review row');
     assert.deepEqual(db.records.customers.map(c => c.data.name).sort(), ['Carroll Diner', 'Jane Doe']);
@@ -259,7 +259,7 @@ const shot = async (page, name, fullPage = false) => {
     const t = await page.innerText('#view');
     assert.match(t, /4 scanned invoices\s+waiting for your review/); assert.match(t, /unpaid on 0 invoices/);
     const stats = await setPnl('2026-01-01', '2026-12-31', 'accrual');
-    assert.match(stats, /\$430\.00\s+revenue/, 'only the three Paid invoices (130 + 60 + 240) count: ' + stats);
+    assert.match(stats, /\$430\.00\s+revenue/, 'only the three Closed invoices (130 + 60 + 240) count: ' + stats);
   });
 
   await step('review: unpaid invoice shows the PDF beside the fields; paying it in full and approving adds the customer and keeps the PDF figures', async () => {
@@ -282,7 +282,7 @@ const shot = async (page, name, fullPage = false) => {
     await page.waitForFunction(id => !document.querySelector('#revform[data-id="' + id + '"]'), un.id); await settle();
     assert.ok(dialogs.some(d => /Add "Bob Builder" as a new customer/.test(d)), dialogs.join(' | '));
     const r = inv('1003');
-    assert.equal(r.data.status, 'Paid'); assert.equal(r.data.balance, 0); assert.equal(r.data.total, 265); assert.equal(r.data.tax, 15); assert.equal(r.data.subtotal, 250);
+    assert.equal(r.data.status, 'Closed'); assert.equal(r.data.balance, 0); assert.equal(r.data.total, 265); assert.equal(r.data.tax, 15); assert.equal(r.data.subtotal, 250);
     assert.equal(custName(r.data.customer), 'Bob Builder'); assert.equal(custs().find(c => c.data.name === 'Bob Builder').data.email, 'bob@example.com');
     assert.ok(r.ai.approved);
   });
@@ -294,7 +294,7 @@ const shot = async (page, name, fullPage = false) => {
     await page.selectOption('#f_customer', jane.id); dialogs.length = 0;
     await page.click('#revform button[type=submit]');
     await page.waitForFunction(id => !document.querySelector('#revform[data-id="' + id + '"]'), near.id); await settle();
-    assert.equal(inv('1004').data.status, 'Paid'); assert.equal(inv('1004').data.customer, jane.id); assert.equal(storedDb().records.customers.length, 3, 'no extra customer');
+    assert.equal(inv('1004').data.status, 'Closed'); assert.equal(inv('1004').data.customer, jane.id); assert.equal(storedDb().records.customers.length, 3, 'no extra customer');
     assert.equal(dialogs.length, 0, 'no dialog when a customer was chosen: ' + dialogs.join(' | '));
     const dup = storedDb().records.invoices.find(r => r.data.reference === '1001' && r.id !== inv('1001').id), pdfPath = dup.pdf.path;
     await go('#/invoices/review/' + dup.id); await page.waitForSelector('#revform[data-id="' + dup.id + '"]');
@@ -313,7 +313,7 @@ const shot = async (page, name, fullPage = false) => {
     await page.fill('#f_amount_paid', '160.06');
     await page.click('#revform button[type=submit]');
     await page.waitForFunction(id => !document.querySelector('#revform[data-id="' + id + '"]'), bad.id); await settle();
-    const r = inv('1006'); assert.equal(r.data.total, 160.06); assert.equal(r.data.subtotal, 151); assert.equal(r.data.tax, 9.06); assert.equal(r.data.status, 'Paid'); assert.equal(r.data.balance, 0);
+    const r = inv('1006'); assert.equal(r.data.total, 160.06); assert.equal(r.data.subtotal, 151); assert.equal(r.data.tax, 9.06); assert.equal(r.data.status, 'Closed'); assert.equal(r.data.balance, 0);
     assert.equal(pendingCount(), 0);
     await go('#/invoices/review'); assert.match(await page.innerText('.empty'), /Nothing is waiting for review/);
   });
@@ -346,7 +346,7 @@ const shot = async (page, name, fullPage = false) => {
     await go('#/list/invoices'); await page.waitForSelector('#rows tr[data-href]');
     assert.ok((await page.$$eval('[data-in=filter] option', os => os.map(o => o.textContent))).includes('Needs Review'), 'Needs Review is offered as a status');
     assert.equal(await page.$$eval('#rows tr[data-href]', r => r.length), before);
-    await page.selectOption('[data-in=filter]', 'Paid');
+    await page.selectOption('[data-in=filter]', 'Closed');
     assert.match(await page.innerText('#rows'), /Jane Doe/);
   });
 
