@@ -72,7 +72,7 @@ const storedDb = () => openData(Buffer.from(gh.files.get(DATA_PATH).content, 'ba
 const sha256 = b => crypto.createHash('sha256').update(b).digest('hex');
 const fixture = n => fs.readFileSync(path.join(FIX, n));
 const BY_SHA = {};
-const li = (description, quantity, unit_price, taxable = true) => ({ description, quantity, unit_price, amount: Math.round(quantity * unit_price * 100) / 100, taxable });
+const li = (description, quantity, unit_price, taxable = true, category = 'Services: Labor') => ({ description, quantity, unit_price, amount: Math.round(quantity * unit_price * 100) / 100, taxable, category });
 const INV = o => ({ document_type: 'invoice', voided: false, invoice_number: null, customer: { name: null, email: null, phone: null, address: null }, date: null, due_date: null, terms: null,
   line_items: [], subtotal: null, tax: null, tax_rate_percent: 6, total: null, amount_paid: null, balance_due: null, paid: null, payment_date: null, payment_method: null,
   memo: null, confidence: 0.96, reason: 'Clear QuickBooks invoice.', pages: '1', ...o });
@@ -87,11 +87,11 @@ const REPLIES = {
     line_items: [li('Data recovery', 1, 250)], subtotal: 250, tax: 15, total: 265, amount_paid: 0, balance_due: 265, paid: false, confidence: 0.95 })] }),
   'inv-dup-number.pdf': () => ({ invoices: [INV({ invoice_number: '1001', customer: JANE, date: '2026-03-10', line_items: JANE_LINES, subtotal: 130, tax: 7.8, total: 137.8, balance_due: 0, paid: true, confidence: 0.96 })] }),
   'inv-near-customer.pdf': () => ({ invoices: [INV({ invoice_number: '1004', customer: { name: 'Jane M Doe', email: null, phone: null, address: null }, date: '2026-05-05',
-    line_items: [li('Router setup', 1, 80)], subtotal: 80, tax: 4.8, total: 84.8, balance_due: 0, paid: true })] }),
+    line_items: [li('Router (AX1800)', 1, 80, true, 'Parts: Hardware')], subtotal: 80, tax: 4.8, total: 84.8, balance_due: 0, paid: true })] }),
   'inv-multi.pdf': () => ({ invoices: [
     INV({ invoice_number: '1005', customer: { name: 'Carroll Diner', email: null, phone: null, address: null }, date: '2026-06-01', line_items: [li('Network cabling', 2, 120, false)], subtotal: 240, tax: 0, tax_rate_percent: 0, total: 240, balance_due: 0, paid: true, pages: '1' }),
     // the printed total does not match subtotal + tax, so this one must go to review (and keeps its customer, who now exists)
-    INV({ invoice_number: '1006', customer: { name: 'Carroll Diner', email: null, phone: null, address: null }, date: '2026-06-15', line_items: [li('POS troubleshooting', 1, 150)], subtotal: 150, tax: 9, total: 160, balance_due: 0, paid: true, pages: '2' })] }),
+    INV({ invoice_number: '1006', customer: { name: 'Carroll Diner', email: null, phone: null, address: null }, date: '2026-06-15', line_items: [li('POS troubleshooting', 1, 150, true, 'Misc')], subtotal: 150, tax: 9, total: 160, balance_due: 0, paid: true, pages: '2' })] }),
 };
 const anth = { calls: [] };
 async function anthropicRoute(route) {
@@ -188,6 +188,7 @@ const shot = async (page, name, fullPage = false) => {
     assert.equal(a.data.subtotal, 130); assert.equal(a.data.tax, 7.8); assert.equal(a.data.total, 137.8); assert.equal(a.data.amount_paid, 137.8); assert.equal(a.data.balance, 0);
     assert.equal(a.data.date_issued, '2026-03-10'); assert.equal(a.data.paid_date, '2026-03-12'); assert.equal(a.data.payment_method, 'Card'); assert.equal(a.data.terms, 'Due on receipt');
     assert.equal(a.data.tax_rate, 6); assert.deepEqual(a.data.items.map(l => [l.d, l.q, l.p, l.t]), [['Malware removal and cleanup', 1, 95, true], ['Windows tune-up', 1, 35, true]]);
+    assert.ok(a.data.items.every(l => l.c === 'Services: Labor'), 'lines carry their category');
     assert.equal(a.data.title, 'Malware removal and cleanup; Windows tune-up'); assert.equal(a.data.notes, 'Thank you!');
     // an invoice that does not show a payment date does not get a made-up one; paid with no amount means paid in full
     assert.equal(b.data.paid_date, undefined); assert.equal(b.data.amount_paid, 63.6); assert.equal(b.data.payment_method, 'Check'); assert.equal(b.data.due, '2026-04-17');
@@ -200,7 +201,7 @@ const shot = async (page, name, fullPage = false) => {
     const c = anth.calls[0];
     assert.equal(c.headers['x-api-key'], TEST_KEY); assert.equal(c.model, 'claude-sonnet-5-5');
     assert.match(c.system, /invoices/); assert.match(c.system, /QuickBooks/); assert.match(c.system, /"invoices":\[/); assert.ok(!/Schedule C/.test(c.system));
-    assert.match(c.ask, /every invoice/);
+    assert.match(c.ask, /every invoice/); assert.match(c.system, /"Services: Labor", "Parts: Hardware"/); assert.match(c.system, /"category":string\|null/);
     assert.deepEqual(cspViolations, [], 'CSP blocked something: ' + cspViolations.join('; '));
   });
 
@@ -228,6 +229,7 @@ const shot = async (page, name, fullPage = false) => {
     assert.deepEqual(db.records.customers.map(c => c.data.name).sort(), ['Carroll Diner', 'Jane Doe']);
     assert.equal(ok.pdf.sha, bad.pdf.sha, 'both invoices in the multi-invoice PDF point at the same stored file');
     assert.equal(ok.data.tax_rate, 0); assert.equal(ok.data.items[0].t, false);
+    assert.equal(near.data.items[0].c, 'Parts: Hardware'); assert.equal(bad.data.items[0].c, 'Services: Labor', 'an unknown category falls back to the default');
   });
 
   await step('same file again is caught by hash with no API call', async () => {
@@ -327,6 +329,46 @@ const shot = async (page, name, fullPage = false) => {
     assert.match(cash, /\$911\.00\s+revenue/, cash);
   });
 
+  await step('Profit & Loss splits revenue by invoice line category', async () => {
+    await setPnl('2026-01-01', '2026-12-31', 'accrual');
+    const t = await page.innerText('#pnlout .pnl');
+    assert.match(t, /Revenue\s+Services: Labor\s+\$831\.00\s+Parts: Hardware\s+\$80\.00\s+Revenue \(before sales tax\)\s+\$911\.00/, t);
+    await shot(page, 'inv-3-pnl-by-category');
+  });
+
+  await step('invoice lines have a category (default Services: Labor); a Parts: Hardware line with a purchased-part expense tied to the invoice', async () => {
+    const jane = custs().find(c => c.data.name === 'Jane Doe');
+    await go('#/new/invoices'); await page.waitForSelector('#recform');
+    assert.deepEqual(await page.$$eval('.li-c option', os => os.map(o => o.textContent)), ['Services: Labor', 'Parts: Hardware']);
+    assert.equal(await page.inputValue('.li-c'), 'Services: Labor');
+    await page.selectOption('#f_customer', jane.id); await page.selectOption('#f_status', 'Sent');
+    await page.fill('.li-d', 'Diagnostics'); await page.fill('.li-p', '50');
+    await page.click('[data-act=line-add]');
+    const rows = await page.$$('.lines tbody tr'); const second = rows[rows.length - 1];
+    await (await second.$('.li-d')).fill('RAM 16GB'); await (await second.$('.li-p')).fill('40'); await (await second.$('.li-c')).selectOption('Parts: Hardware');
+    await page.click('#recform button[type=submit]'); await settle();
+    const made = storedDb().records.invoices.find(r => (r.data.items || []).some(l => l.d === 'RAM 16GB'));
+    assert.deepEqual(made.data.items.map(l => [l.d, l.c]), [['Diagnostics', 'Services: Labor'], ['RAM 16GB', 'Parts: Hardware']]);
+    // the purchase of the part is an expense tied to that invoice
+    await go('#/new/expenses'); await page.waitForSelector('#recform');
+    assert.ok(await page.$('#f_invoice'), 'expenses have a Billable to invoice field');
+    await page.fill('#f_vendor', 'Newegg'); await page.fill('#f_date', '2026-06-20'); await page.selectOption('#f_category', 'Parts and inventory (COGS)'); await page.fill('#f_amount', '31.5');
+    await page.selectOption('#f_invoice', made.id);
+    await page.click('#recform button[type=submit]'); await settle();
+    assert.equal(storedDb().records.expenses.find(r => r.data.vendor === 'Newegg').data.invoice, made.id);
+    await go('#/rec/invoices/' + made.id); assert.match(await page.innerText('.related'), /Expenses[\s\S]*Newegg/, 'the invoice lists the expense tied to it');
+    const t = await (async () => { await setPnl('2026-01-01', '2026-12-31', 'accrual'); return page.innerText('#pnlout .pnl'); })();
+    assert.match(t, /Services: Labor\s+\$881\.00\s+Parts: Hardware\s+\$120\.00\s+Revenue \(before sales tax\)\s+\$1,001\.00/, t);
+    assert.match(t, /Cost of goods\s+Parts and inventory \(COGS\)\s+\$31\.50/, 'the part is cost of goods, separate from the revenue lines: ' + t);
+  });
+
+  await step('the income category list is editable in Settings and shows in the invoice form', async () => {
+    await go('#/settings'); await page.fill('[data-in=inccats]', 'Services: Labor, Parts: Hardware, Services: Software'); await page.press('[data-in=inccats]', 'Tab'); await settle();
+    assert.deepEqual(storedDb().settings.incomeCats, ['Services: Labor', 'Parts: Hardware', 'Services: Software']);
+    await go('#/new/invoices'); await page.waitForSelector('#recform');
+    assert.deepEqual(await page.$$eval('.li-c option', os => os.map(o => o.textContent)), ['Services: Labor', 'Parts: Hardware', 'Services: Software']);
+  });
+
   await step('keyboard: N from the invoice scanner opens a new invoice', async () => {
     await go('#/invoices/scan'); await page.keyboard.press('n'); await page.waitForTimeout(200);
     assert.match(await page.evaluate(() => location.hash), /^#\/new\/invoices/);
@@ -337,12 +379,14 @@ const shot = async (page, name, fullPage = false) => {
     const fs_ = db.schema.invoices.fields;
     db.schema.invoices.fields = fs_.filter(f => f.id !== 'reference' && f.id !== 'pdf');
     db.schema.invoices.fields.find(f => f.id === 'status').options = ['Draft', 'Sent', 'Paid', 'Closed', 'Void'];
-    db.meta.mig = db.meta.mig.filter(k => k !== 'inv_scan');
+    db.schema.expenses.fields = db.schema.expenses.fields.filter(f => f.id !== 'invoice');
+    db.meta.mig = db.meta.mig.filter(k => k !== 'inv_scan' && k !== 'exp_invoice');
     gh.files.set(DATA_PATH, { content: Buffer.from(sealData(db)).toString('base64'), sha: sha1('old' + Date.now()) });
     await page.reload(); await page.fill('input[name=u]', USER); await page.fill('input[name=p]', PASS); await page.click('button[type=submit]');
     await page.waitForSelector('#rail a');
     await go('#/fields/invoices');
     const t = await page.innerText('#view'); assert.match(t, /Original invoice number/); assert.match(t, /Source PDF/);
+    await go('#/fields/expenses'); assert.match(await page.innerText('#view'), /Billable to invoice/);
     await go('#/list/invoices'); await page.waitForSelector('#rows tr[data-href]');
     assert.ok((await page.$$eval('[data-in=filter] option', os => os.map(o => o.textContent))).includes('Needs Review'), 'Needs Review is offered as a status');
     assert.equal(await page.$$eval('#rows tr[data-href]', r => r.length), before);
