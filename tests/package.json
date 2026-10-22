@@ -1,0 +1,7 @@
+{
+  "name": "bench-crm-tests",
+  "private": true,
+  "description": "Playwright end-to-end tests for the Expenses ledger, AI receipt scanner and AI invoice scanner (GitHub and Anthropic are mocked).",
+  "scripts": { "test": "node expenses.test.js && node invoices.test.js", "fixtures": "python3 make_fixtures.py" },
+  "devDependencies": { "playwright": "^1.56.0" }
+}

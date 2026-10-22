@@ -1,0 +1,105 @@
+%PDF-1.3
+%“Œ‹ž ReportLab Generated PDF document (opensource)
+1 0 obj
+<<
+/F1 2 0 R /F2 3 0 R
+>>
+endobj
+2 0 obj
+<<
+/BaseFont /Helvetica /Encoding /WinAnsiEncoding /Name /F1 /Subtype /Type1 /Type /Font
+>>
+endobj
+3 0 obj
+<<
+/BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding /Name /F2 /Subtype /Type1 /Type /Font
+>>
+endobj
+4 0 obj
+<<
+/Contents 8 0 R /MediaBox [ 0 0 612 792 ] /Parent 7 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 /Trans <<
+
+>> 
+  /Type /Page
+>>
+endobj
+5 0 obj
+<<
+/PageMode /UseNone /Pages 7 0 R /Type /Catalog
+>>
+endobj
+6 0 obj
+<<
+/Author (anonymous) /CreationDate (D:20261021133048+00'00') /Creator (anonymous) /Keywords () /ModDate (D:20261021133048+00'00') /Producer (ReportLab PDF Library - \(opensource\)) 
+  /Subject (unspecified) /Title (untitled) /Trapped /False
+>>
+endobj
+7 0 obj
+<<
+/Count 1 /Kids [ 4 0 R ] /Type /Pages
+>>
+endobj
+8 0 obj
+<<
+/Length 1110
+>>
+stream
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+BT /F2 20 Tf 24 TL ET
+BT 1 0 0 1 72 710 Tm (Precision Tech Bench) Tj T* ET
+BT /F2 14 Tf 16.8 TL ET
+BT 1 0 0 1 400 710 Tm (INVOICE 1001) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 72 690 Tm (Bill to: Jane Doe) Tj T* ET
+BT 1 0 0 1 72 676 Tm (Invoice date: 2026-03-10) Tj T* ET
+BT /F1 11 Tf 13.2 TL ET
+BT 1 0 0 1 72 630 Tm (Malware removal and cleanup) Tj T* ET
+BT 1 0 0 1 380 630 Tm (1) Tj T* ET
+BT 1 0 0 1 512.478 630 Tm (95.00) Tj T* ET
+BT 1 0 0 1 72 612 Tm (Windows tune-up) Tj T* ET
+BT 1 0 0 1 380 612 Tm (1) Tj T* ET
+BT 1 0 0 1 512.478 612 Tm (35.00) Tj T* ET
+BT 1 0 0 1 380 584 Tm (Subtotal) Tj T* ET
+BT 1 0 0 1 506.362 584 Tm (130.00) Tj T* ET
+BT 1 0 0 1 380 568 Tm (Sales tax) Tj T* ET
+BT 1 0 0 1 518.594 568 Tm (7.80) Tj T* ET
+BT /F2 12 Tf 14.4 TL ET
+BT 1 0 0 1 380 550 Tm (TOTAL) Tj T* ET
+BT 1 0 0 1 503.304 550 Tm (137.80) Tj T* ET
+BT 1 0 0 1 380 532 Tm (Balance due) Tj T* ET
+BT 1 0 0 1 516.648 532 Tm (0.00) Tj T* ET
+BT /F2 28 Tf 33.6 TL ET
+BT 1 0 0 1 72 300 Tm (PAID) Tj T* ET
+BT /F1 6 Tf 7.2 TL ET
+.85 g
+BT 1 0 0 1 72 40 Tm (FIXTURE:inv-paid) Tj T* ET
+0 g
+ 
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000061 00000 n 
+0000000102 00000 n 
+0000000209 00000 n 
+0000000321 00000 n 
+0000000514 00000 n 
+0000000582 00000 n 
+0000000843 00000 n 
+0000000902 00000 n 
+trailer
+<<
+/ID 
+[<22087553ffc215b2ef3d6acec209b215><22087553ffc215b2ef3d6acec209b215>]
+% ReportLab generated PDF document -- digest (opensource)
+
+/Info 6 0 R
+/Root 5 0 R
+/Size 9
+>>
+startxref
+2063
+%%EOF

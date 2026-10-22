@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>PTB Bench CRM</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://api.github.com https://precisiontechbench.com https://www.precisiontechbench.com; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://api.github.com https://api.anthropic.com https://precisiontechbench.com https://www.precisiontechbench.com; frame-src blob:; base-uri 'none'; form-action 'none'; object-src 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#2F4B5A">
@@ -180,7 +180,7 @@ body.locked .app{grid-template-columns:1fr} body.locked .rail{display:none}
 .lines th{font:600 .8rem/1.2 'Barlow',sans-serif; color:var(--muted); text-align:left; padding:.3rem .35rem}
 .lines td{padding:.25rem .35rem; vertical-align:middle}
 .lines .num{text-align:right; width:6.5rem} .lines td.num input[type=number]{text-align:right}
-.lines td:first-child{min-width:16rem} .lines td:last-child{width:2.5rem}
+.lines td:first-child{min-width:16rem} .lines .li-c{min-width:9.5rem} .lines td:last-child{width:2.5rem}
 .lines .li-a{font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink)}
 input.calc{background:var(--sunk); font-weight:600; font-variant-numeric:tabular-nums}
 #print table.items th{width:auto}
@@ -199,6 +199,31 @@ table.pnl tr.sum td{border-top:1px solid var(--line); font-weight:600}
 table.pnl tr.total td{border-top:2px solid var(--ink); font-weight:700; font-size:1.05em}
 table.pnl tr.memo td{color:var(--muted); font-size:.9em}
 table.pnl .neg{color:var(--danger)}
+
+/* Expenses: scanner, review queue, ledger */
+.tabs .count{display:inline-block; min-width:1.25rem; padding:0 .35rem; margin-left:.25rem; border-radius:99px; background:var(--tag); color:var(--tag-ink); font-size:.75rem; font-weight:600; text-align:center}
+.dropzone{border:2px dashed var(--line); border-radius:10px; background:var(--surface); padding:2rem 1rem; text-align:center; display:flex; flex-direction:column; align-items:center; gap:.9rem; transition:border-color .15s, background .15s}
+.dropzone p{margin:0}
+.dropzone.over{border-color:var(--focus); background:var(--sunk)}
+.scanlist{list-style:none; margin:1rem 0 0; padding:0; display:grid; gap:.6rem}
+.scanrow{background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:.8rem 1rem}
+.scanhead{display:flex; gap:.75rem; align-items:baseline; flex-wrap:wrap; margin-bottom:.45rem}
+.scanhead b{overflow-wrap:anywhere}
+.scanstate{margin-left:auto; font-size:.85rem; font-weight:600; color:var(--muted)}
+.scanstate[data-s="done"]{color:var(--ok)} .scanstate[data-s="error"]{color:var(--danger)} .scanstate[data-s="dup"]{color:var(--warn)}
+.bar{height:6px; background:var(--sunk); border-radius:3px; overflow:hidden}
+.bar i{display:block; height:100%; background:var(--mat); border-radius:3px; transition:width .3s}
+.bar.ind i{width:35% !important; animation:ind 1.3s ease-in-out infinite}
+@keyframes ind{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+@media (prefers-reduced-motion:reduce){.bar.ind i{animation:none; width:60% !important}}
+.reviewgrid{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:1rem; align-items:start}
+.reviewgrid > section{position:sticky; top:1rem}
+.pdfframe{width:100%; height:min(78vh,820px); border:1px solid var(--line); border-radius:6px; background:var(--sunk)}
+.revflags{margin:1rem 1.25rem 0; padding:.6rem .9rem; border:1px solid var(--warn); border-left-width:4px; border-radius:6px; background:var(--bg)}
+.revflags ul,.ainote ul{margin:.3rem 0 0; padding-left:1.1rem}
+.ainote{padding:.7rem 1rem; margin-bottom:1rem; font-size:.95rem}
+.aiitems{width:100%; border-collapse:collapse; font-size:.9rem; margin-top:.5rem} .aiitems td{padding:.2rem .4rem; border-top:1px solid var(--line)} .aiitems td:nth-child(n+2){text-align:right; white-space:nowrap}
+@media (max-width:900px){ .reviewgrid{grid-template-columns:1fr} .reviewgrid > section{position:static} }
 @media (max-width:860px){
   .record{grid-template-columns:1fr}
 }
