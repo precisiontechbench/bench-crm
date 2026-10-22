@@ -26,6 +26,14 @@ Expenses has four tabs: **Ledger**, **Scan receipts**, **Needs review**, **Profi
 
 **Profit & Loss** counts only Posted expenses for the first business in the list (Precision Tech Bench), because it is built from this shop's invoices.
 
+## Invoice line categories and the Profit & Loss report
+
+Every invoice line has a **Category**, chosen from a list you control under Settings > Invoice line categories. It starts as **Services: Labor** (the default) and **Parts: Hardware**. A line with no category counts as the first one in the list, so your existing invoices report as Services: Labor until you change a line. Picking a service from your Services list sets the category too (a Parts service becomes Parts: Hardware).
+
+The **Profit & Loss** report now splits revenue by that category (Services: Labor, Parts: Hardware, and so on) above the total. Each invoice's lines are scaled to its subtotal, so the revenue total never changes, and sales tax is still left out. **Cost of goods** still comes from your expenses (the categories ticked under Settings > Profit & Loss), so a part you bought for a customer shows as revenue on the Parts: Hardware line and as a cost of goods expense.
+
+To tie a purchase to the job it was for, use **Billable to invoice** on the expense. It then shows under that invoice's related records. The scanner also reads a category for each invoice line from the PDF, using the same list.
+
 ## Invoices and the AI invoice scanner
 
 Invoices has three tabs: **All invoices**, **Scan invoices**, **Needs review**. Use it to bring paid invoices over from QuickBooks Online (or anywhere else) as PDFs. It uses the same Anthropic key, model, PDF storage and review screen as the receipt scanner.
