@@ -578,6 +578,7 @@ function viewList(ent){
   const fv = ui.filter[ent] || '';
   return `${ent === 'expenses' ? expTabs('list') : ''}<div class="head"><div><h1>${h(sc.label)}</h1><p>${db.records[ent].length} total<span id="rowsum"></span></p></div>
     <div class="row">${ent === 'services' ? `<button class="btn small" data-act="csv" data-ent="services">Export CSV</button><button class="btn small" data-act="print-prices">Print price list</button>` : ''}<a class="btn small" href="#/fields/${ent}">Edit fields</a><a class="btn primary" href="#/new/${ent}">New ${h(sc.singular.toLowerCase())}</a></div></div>
+    ${ent === 'invoices' ? invFilters() : ''}
     <div class="toolbar"><input type="search" placeholder="Search ${h(sc.label.toLowerCase())}" aria-label="Search" data-in="search" data-ent="${ent}" value="${h(ui.q[ent]||'')}">
     ${sf ? `<select data-in="filter" data-ent="${ent}" aria-label="Filter"><option value=""></option>
       ${DONE_KEY[ent] ? `<option value="__open" ${fv==='__open'?'selected':''}>${ent === 'services' ? 'Active only' : 'Open only'}</option>` : ''}
@@ -594,6 +595,7 @@ function fillRows(ent){
   if (q) rows = rows.filter(r => (tagOf(ent,r) + ' ' + sc.fields.map(f => fmt(f, r.data[f.id])).join(' ') + ' ' + digits(r.data.phone)).toLowerCase().includes(q));
   const fv = ui.filter[ent];
   if (fv === '__open') rows = rows.filter(r => !isClosed(ent, r)); else if (fv) rows = rows.filter(r => r.data[ent === 'expenses' ? 'category' : 'status'] === fv);
+  if (ent === 'invoices') rows = filterInvoices(rows);
   const s = ui.sort[ent] || {k:'no', dir:-1};
   const f = fld(ent, s.k);
   rows.sort((a,b) => {
@@ -604,12 +606,63 @@ function fillRows(ent){
     else { x = fmt(f||{}, a.data[s.k]).toLowerCase(); y = fmt(f||{}, b.data[s.k]).toLowerCase(); }
     return (x > y ? 1 : x < y ? -1 : 0) * s.dir;
   });
-  const sum = $('#rowsum'); if (sum) sum.textContent = ent === 'expenses' && rows.length ? ` · showing ${rows.length} totaling ${money(rows.reduce((a,r) => a + (+r.data.amount || 0), 0))}` : '';
+  const sum = $('#rowsum'); if (sum){
+    const tot = k => money(rows.reduce((a,r) => a + (+r.data[k] || 0), 0));
+    sum.textContent = !rows.length ? '' : ent === 'expenses' ? ` · showing ${rows.length} totaling ${tot('amount')}`
+      : ent === 'invoices' ? ` · showing ${rows.length}: billed ${tot('total')}, balance due ${tot('balance')}` : '';
+  }
   const tb = $('#rows'); if (!tb) return;
   tb.innerHTML = rows.length ? rows.map(r => `<tr data-href="#/rec/${ent}/${r.id}" tabindex="0">
       <td><span class="tag">${h(tagOf(ent,r))}</span></td>
       ${cols.map(f => `<td data-label="${h(f.label)}">${cell(ent,f,r)}</td>`).join('')}</tr>`).join('')
     : `<tr><td colspan="${cols.length+1}" class="empty">${db.records[ent].length ? 'No matches. Try a different search or filter.' : `No ${h(sc.label.toLowerCase())} yet.<br><a class="btn primary" href="#/new/${ent}">New ${h(sc.singular.toLowerCase())}</a>`}</td></tr>`;
+}
+
+/* ---------- invoice search: boolean name match and date ranges ---------- */
+ui.inv = {name:'', field:'date_issued', preset:'', from:'', to:'', overdue:false};
+// Words are ANDed by default. Supports AND, OR, NOT, -word, "exact phrase" and ( ). Returns null for an empty query.
+function boolMatcher(q){
+  const toks = []; const re = /\s*(\(|\)|"[^"]*"?|[^\s()"]+)/g; let m;
+  while ((m = re.exec(String(q || '')))) toks.push(m[1]);
+  if (!toks.length) return null;
+  let i = 0; const peek = () => toks[i], isOp = (t, w) => !!t && t.toUpperCase() === w;
+  const stop = () => i >= toks.length || peek() === ')' || isOp(peek(), 'OR');
+  function orE(){ let a = andE(); while (isOp(peek(), 'OR')){ i++; const b = andE(), x = a; a = s => x(s) || b(s); } return a; }
+  function andE(){ let a = unary(); while (!stop()){ if (isOp(peek(), 'AND')) i++; if (stop()) break; const b = unary(), x = a; a = s => x(s) && b(s); } return a; }
+  function unary(){
+    const t = peek(); if (t === undefined) return () => true;
+    if (isOp(t, 'NOT')){ i++; const a = unary(); return s => !a(s); }
+    if (isOp(t, 'AND') || isOp(t, 'OR')){ i++; return unary(); }
+    if (t === '('){ i++; const e = orE(); if (peek() === ')') i++; return e; }
+    if (t === ')'){ i++; return () => true; }
+    i++;
+    if (t.length > 1 && t[0] === '-'){ const w = t.slice(1).toLowerCase(); return s => !s.includes(w); }
+    const w = t.replace(/^[+"]|"$/g, '').toLowerCase(); return s => s.includes(w);
+  }
+  return orE();
+}
+function filterInvoices(rows){
+  const I = ui.inv, nm = boolMatcher(I.name), t = today();
+  let from = '', to = '';
+  if (I.preset === 'custom'){ from = I.from; to = I.to; } else if (I.preset) [from, to] = rangeFor(I.preset);
+  return rows.filter(r => {
+    if (nm){ const c = find('customers', r.data.customer); if (!nm(((c?.data.name || '') + ' ' + (c?.data.company || '')).toLowerCase())) return false; }
+    if (from || to){ const d = r.data[I.field]; if (!d || (from && d < from) || (to && d > to)) return false; }
+    if (I.overdue && !(+r.data.balance > 0 && !isClosed('invoices', r) && r.data.due && r.data.due < t)) return false;
+    return true;
+  });
+}
+function invFilters(){
+  const I = ui.inv, presets = [['today','Today'],['yesterday','Yesterday'],['last7','Last 7 days'],['last30','Last 30 days'],['week','This week'],['month','This month'],['lastmonth','Last month'],['quarter','This quarter'],['lastquarter','Last quarter'],['ytd','Year to date'],['lastyear','Last year'],['next7','Next 7 days'],['next30','Next 30 days'],['custom','Custom range']];
+  return `<div class="toolbar invfilters">
+    <label class="f grow"><span>Customer name</span><input type="search" data-in="invname" placeholder="smith AND NOT jones" value="${h(I.name)}" aria-describedby="invname-help"></label>
+    <label class="f"><span>Search by date</span><select data-in="invdate" data-k="field">${sch('invoices').fields.filter(f => f.type === 'date').map(f => `<option value="${f.id}" ${I.field===f.id?'selected':''}>${h(f.label)}</option>`).join('')}</select></label>
+    <label class="f"><span>Period</span><select data-in="invdate" data-k="preset"><option value="">Any time</option>${presets.map(([v,l]) => `<option value="${v}" ${I.preset===v?'selected':''}>${l}</option>`).join('')}</select></label>
+    <label class="f"><span>From</span><input type="date" data-in="invdate" data-k="from" value="${h(I.from)}"></label>
+    <label class="f"><span>To</span><input type="date" data-in="invdate" data-k="to" value="${h(I.to)}"></label>
+    <label class="f chk"><input type="checkbox" data-in="invdate" data-k="overdue" ${I.overdue?'checked':''}>Overdue only</label>
+    <button class="btn small" data-act="inv-clear">Clear filters</button></div>
+    <p class="meta" id="invname-help" style="margin:-.4rem 0 .9rem">Name search understands AND, OR, NOT, "exact phrase" and ( ). Spaces mean AND. Example: smith OR jones NOT "carroll county"</p>`;
 }
 
 /* ---------- record form ---------- */
@@ -977,12 +1030,21 @@ function sample(){
 /* ---------- profit & loss ---------- */
 const expTabs = cur => `<nav class="tabs" aria-label="Expenses"><a href="#/list/expenses" ${cur==='list'?'aria-current="page"':''}>Expenses</a><a href="#/pnl" ${cur==='pnl'?'aria-current="page"':''}>Profit &amp; Loss</a></nav>`;
 const pnl = { preset:'ytd', from:'', to:'', basis:'cash', monthly:false };
-function pnlRange(){
+// Shared date presets for the P&L report and the invoice search. Weeks start on Monday.
+function rangeFor(p){
   const t = today(), y = t.slice(0,4), m = +t.slice(5,7);
   const ms = (yy, mm) => `${yy}-${String(mm).padStart(2,'0')}-01`;
   const monthEnd = iso => shiftDate(iso, {months:1, days:-1});
   const qs = ms(y, 3 * Math.floor((m - 1) / 3) + 1);
-  switch (pnl.preset){
+  const wk = shiftDate(t, {days: -((new Date(t + 'T00:00:00Z').getUTCDay() + 6) % 7)});
+  switch (p){
+    case 'today': return [t, t];
+    case 'yesterday': { const d = shiftDate(t, {days:-1}); return [d, d]; }
+    case 'last7': return [shiftDate(t, {days:-6}), t];
+    case 'last30': return [shiftDate(t, {days:-29}), t];
+    case 'next7': return [t, shiftDate(t, {days:7})];
+    case 'next30': return [t, shiftDate(t, {days:30})];
+    case 'week': return [wk, shiftDate(wk, {days:6})];
     case 'month': return [ms(y,m), monthEnd(ms(y,m))];
     case 'lastmonth': { const s = shiftDate(ms(y,m), {months:-1}); return [s, monthEnd(s)]; }
     case 'quarter': return [qs, shiftDate(qs, {months:3, days:-1})];
@@ -990,10 +1052,13 @@ function pnlRange(){
     case 'ytd': return [`${y}-01-01`, t];
     case 'last12': return [shiftDate(t, {months:-12, days:1}), t];
     case 'lastyear': return [`${+y - 1}-01-01`, `${+y - 1}-12-31`];
-    default: return [pnl.from || `${y}-01-01`, pnl.to || t];
   }
+  return ['', ''];
 }
-// Revenue excludes sales tax. Cash basis counts the paid share of each invoice on the day it was paid; accrual counts the whole invoice on its issue date.
+function pnlRange(){
+  const r = rangeFor(pnl.preset);
+  return r[0] ? r : [pnl.from || `${today().slice(0,4)}-01-01`, pnl.to || today()];
+}// Revenue excludes sales tax. Cash basis counts the paid share of each invoice on the day it was paid; accrual counts the whole invoice on its issue date.
 function pnlPeriod(from, to){
   const inR = d => d && d >= from && d <= to;
   let rev = 0, tax = 0, nInv = 0;
@@ -1237,6 +1302,7 @@ document.addEventListener('click', e => {
   else if (act === 'print-doc') printDoc(ent, t.dataset.id);
   else if (act === 'email-doc') emailDoc(ent, t.dataset.id);
   else if (act === 'print-prices') printPrices();
+  else if (act === 'inv-clear'){ ui.inv = {name:'', field:ui.inv.field, preset:'', from:'', to:'', overdue:false}; ui.q.invoices = ''; ui.filter.invoices = ''; route(); }
   else if (act === 'pnl-print') printPnl();
   else if (act === 'pnl-csv') pnlCsv();
   else if (act === 'est-to-inv') estimateToInvoice(t.dataset.id);
@@ -1292,6 +1358,7 @@ document.addEventListener('keydown', e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.dataset.in === 'search'){ ui.q[t.dataset.ent] = t.value; fillRows(t.dataset.ent); }
+  if (t.dataset.in === 'invname'){ ui.inv.name = t.value; fillRows('invoices'); }
   if (t.matches('.lines .li-d')) applyService(t.closest('tr'));
   const form = t.closest('#recform'); if (form && (t.closest('.lines') || t.name === 'f_tax_rate' || t.name === 'f_amount_paid')) recalc(form);
 });
@@ -1299,6 +1366,12 @@ document.addEventListener('change', e => {
   const t = e.target, k = t.dataset.k;
   switch (t.dataset.in){
     case 'filter': ui.filter[t.dataset.ent] = t.value; fillRows(t.dataset.ent); break;
+    case 'invdate': { const I = ui.inv;
+      if (k === 'overdue') I.overdue = t.checked;
+      else if (k === 'field') I.field = t.value;
+      else if (k === 'preset'){ const cur = [I.from, I.to]; I.preset = t.value; [I.from, I.to] = t.value === 'custom' ? cur : rangeFor(t.value); }
+      else { I.preset = 'custom'; I[k] = t.value; }
+      route(); break; }
     case 'pnl': {
       if (k === 'monthly') pnl.monthly = t.checked;
       else if (k === 'basis') pnl.basis = t.value;
