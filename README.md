@@ -26,6 +26,12 @@ Expenses has four tabs: **Ledger**, **Scan receipts**, **Needs review**, **Profi
 
 **Profit & Loss** counts only Posted expenses for the first business in the list (Precision Tech Bench), because it is built from this shop's invoices.
 
+## Hide data button
+
+The pill in the very top-right corner of every page (**Hide data** / **Data hidden**, or `Alt+H`) blurs sensitive information when someone else can see the screen: dollar amounts, customer names and companies, email addresses and phone numbers, in lists, forms, reports and the dashboard. Click it again to show everything. The choice is remembered in this browser, including across a lock or reload.
+
+It is a screen privacy cover only. It changes no data, and printing, CSV exports, backups and what is stored in GitHub are not affected. A field you click into is shown while you edit it, and the customer drop-down list shows names while it is open.
+
 ## Invoice line categories and the Profit & Loss report
 
 Every invoice line has a **Category**, chosen from a list you control under Settings > Invoice line categories. It starts as **Services: Labor** (the default) and **Parts: Hardware**. A line with no category counts as the first one in the list, so your existing invoices report as Services: Labor until you change a line. Picking a service from your Services list sets the category too (a Parts service becomes Parts: Hardware).

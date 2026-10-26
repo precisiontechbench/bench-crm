@@ -162,6 +162,10 @@ const shot = async (page, name, fullPage = false) => {
 
   await step('sign in with the vault and save the API key', async () => {
     await page.goto(base);
+    // landing page: the heading is the company name and the yellow PTB tag sits underneath it
+    const gate = await page.$$eval('.gate form > *', els => els.slice(0, 2).map(e => [e.tagName, e.textContent.trim(), e.className]));
+    assert.deepEqual(gate, [['H1', 'Precision Tech Bench, LLC CRMS', ''], ['SPAN', 'PTB', 'tag big']]);
+    await shot(page, 'landing');
     await page.fill('input[name=u]', USER); await page.fill('input[name=p]', PASS); await page.click('button[type=submit]');
     await page.waitForSelector('#rail a'); await settle();
     await go('#/settings'); await page.fill('#aikey', TEST_KEY); await page.click('[data-act=ai-key-save]');
@@ -367,6 +371,51 @@ const shot = async (page, name, fullPage = false) => {
     assert.deepEqual(storedDb().settings.incomeCats, ['Services: Labor', 'Parts: Hardware', 'Services: Software']);
     await go('#/new/invoices'); await page.waitForSelector('#recform');
     assert.deepEqual(await page.$$eval('.li-c option', os => os.map(o => o.textContent)), ['Services: Labor', 'Parts: Hardware', 'Services: Software']);
+  });
+
+  await step('Hide data button: top-right on every page, blurs amounts, customer names, emails and phones, and remembers its state', async () => {
+    const names = custs().map(c => c.data.name), jane = custs().find(c => c.data.name === 'Jane Doe'), anyInv = inv('1001');
+    const leaks = () => page.evaluate(names => {
+      const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rx = new RegExp('-?\\$\\s?\\d[\\d,]*(?:\\.\\d+)?|[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+|' + names.map(esc).join('|'), 'i');
+      const out = [], w = document.createTreeWalker(document.querySelector('#view'), NodeFilter.SHOW_TEXT);
+      for (let n; (n = w.nextNode());){ if (!n.nodeValue.trim() || n.parentElement.closest('.sx,script,style,textarea,option')) continue; const m = rx.exec(n.nodeValue); if (m) out.push('text ' + m[0]); }
+      for (const el of document.querySelectorAll('#view input,#view select')){
+        const sens = /^f_(total|subtotal|tax|amount|amount_paid|balance|customer|name|company|email|phone|address)$/.test(el.name) || el.classList.contains('li-p');
+        if (sens && el.value !== '' && !el.classList.contains('sx-in') && !['email', 'tel'].includes(el.type)) out.push('input ' + (el.name || el.className));
+      }
+      return out;
+    }, names);
+    const blurred = sel => page.$eval(sel, el => getComputedStyle(el).filter);
+    await go('#/'); const box = await (await page.$('#privbtn')).boundingBox(), vp = page.viewportSize();
+    assert.ok(box.y < 40 && vp.width - (box.x + box.width) < 40, 'button is in the very top-right corner: ' + JSON.stringify(box));
+    assert.equal(await page.getAttribute('#privbtn', 'aria-pressed'), 'false'); assert.match(await page.innerText('#privbtn'), /Hide data/);
+    assert.ok((await leaks()).length > 0, 'sanity: the test data does show amounts and names when visible');
+    await page.click('#privbtn'); await page.waitForTimeout(150);
+    assert.equal(await page.getAttribute('#privbtn', 'aria-pressed'), 'true'); assert.match(await page.innerText('#privbtn'), /Data hidden/);
+    await shot(page, 'privacy-on-dashboard');
+    const pages = ['#/', '#/list/customers', '#/rec/customers/' + jane.id, '#/list/invoices', '#/rec/invoices/' + anyInv.id, '#/list/expenses', '#/pnl', '#/list/followups', '#/list/tickets', '#/invoices/review', '#/new/invoices'];
+    for (const p of pages){ await go(p); await page.waitForTimeout(200); assert.deepEqual(await leaks(), [], p + ' shows sensitive data while hidden'); }
+    await go('#/list/invoices'); await page.waitForSelector('#rows tr[data-href]'); await page.waitForTimeout(200);
+    assert.match(await blurred('#rows .sx'), /blur/); await shot(page, 'privacy-on-invoices');
+    await go('#/rec/customers/' + jane.id); await page.waitForTimeout(200);
+    assert.match(await blurred('#f_name'), /blur/); assert.match(await blurred('#f_email'), /blur/);
+    await go('#/rec/invoices/' + anyInv.id); await page.waitForTimeout(200);
+    assert.match(await blurred('#f_total'), /blur/); assert.match(await blurred('#f_customer'), /blur/); assert.match(await blurred('.li-p'), /blur/);
+    // typing into a hidden field reveals it while it has focus
+    await page.focus('#f_notes'); await page.focus('#f_total'); assert.equal(await blurred('#f_total'), 'none');
+    // the data itself is untouched, so printing and exports are not affected
+    assert.equal(+(await page.inputValue('#f_total')), anyInv.data.total);
+    // the choice is remembered across a reload (and shows on the login page too)
+    await settle(); await page.reload(); await page.waitForSelector('input[name=u]');
+    assert.equal(await page.getAttribute('#privbtn', 'aria-pressed'), 'true'); assert.ok(await page.evaluate(() => document.body.classList.contains('priv')));
+    await page.fill('input[name=u]', USER); await page.fill('input[name=p]', PASS); await page.click('button[type=submit]'); await page.waitForSelector('#rail a'); await page.waitForTimeout(300);
+    assert.deepEqual(await leaks(), [], 'dashboard after sign-in is still hidden');
+    // Alt+H shows everything again
+    await page.keyboard.press('Alt+h'); await page.waitForTimeout(150);
+    assert.equal(await page.getAttribute('#privbtn', 'aria-pressed'), 'false');
+    await go('#/list/invoices'); await page.waitForSelector('#rows tr[data-href]');
+    assert.equal(await blurred('#rows td'), 'none'); assert.equal(await page.evaluate(() => localStorage.getItem('ptb-bench-crm-privacy')), '0');
   });
 
   await step('keyboard: N from the invoice scanner opens a new invoice', async () => {

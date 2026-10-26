@@ -131,6 +131,8 @@ const DEFAULT_SCHEMA = {
     F('notes','Notes','textarea')]}
 };
 const ICON = {
+  eye:'<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeoff:'<path d="M3 3l18 18M10.6 5.7A9.6 9.6 0 0 1 12 5.5c6.4 0 10 6.5 10 6.5a17 17 0 0 1-3.2 4M6.3 7.4C3.7 9.2 2 12 2 12s3.6 6.5 10 6.5c1.5 0 2.9-.4 4.1-.9"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
   bench:'<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/>',
   customers:'<circle cx="12" cy="8" r="3.5"/><path d="M4.5 20.5c1-3.8 4-5.5 7.5-5.5s6.5 1.7 7.5 5.5"/>',
   assets:'<rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M9.5 7h5M9.5 10.5h5M12 17h0"/>',
@@ -462,7 +464,7 @@ window.addEventListener('beforeunload', e => { if (dirty){ stashPending(); e.pre
 /* ---------- login and first-time setup ---------- */
 function viewLogin(){
   return `<div class="gate"><form class="panel" id="loginform" autocomplete="on">
-    <span class="tag big">PTB</span><h1>Bench CRM</h1><p>${lockNote ? h(lockNote) : 'Sign in to open your records.'}</p>
+    <h1>Precision Tech Bench, LLC CRMS</h1><span class="tag big">PTB</span><p>${lockNote ? h(lockNote) : 'Sign in to open your records.'}</p>
     <label class="f">Username<input name="u" autocomplete="username" required autofocus></label>
     <label class="f">Password<input name="p" type="password" autocomplete="current-password" required></label>
     <p class="err" role="alert"></p>
@@ -2050,6 +2052,7 @@ document.addEventListener('click', e => {
   else if (act === 'sample') sample();
   else if (act === 'wipe'){ if (confirm('Erase every record and reset all fields? This also erases them from GitHub (earlier versions stay in the repository history).') && confirm('Erase everything?')){
       replaceDb(freshDb()); toast('All data erased'); location.hash = '#/'; route(); } }
+  else if (act === 'privacy') setPriv(!priv.on);
   else if (act === 'lock') lock('Locked.');
   else if (act === 'push-now'){ if (dirty || !remoteSha) push(); else toast('Everything is already saved'); }
   else if (act === 'pull-now') refresh(true);
@@ -2066,6 +2069,7 @@ document.addEventListener('keydown', e => {
   const typingIn = e.target.closest('input,textarea,select,[contenteditable]');
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's'){
     const f = $('#dlg[open] form') || $('#recform') || $('#revform'); if (f){ e.preventDefault(); f.requestSubmit(); } return; }
+  if (e.altKey && e.key.toLowerCase() === 'h'){ e.preventDefault(); setPriv(!priv.on); return; }
   if (e.altKey && /^[1-9]$/.test(e.key)){ e.preventDefault();
     location.hash = ['#/', ...ENTS.map(x => '#/list/' + x), '#/settings'][+e.key-1]; return; }
   if (typingIn || e.ctrlKey || e.metaKey || e.altKey || $('#dlg[open]')) return;
@@ -2153,5 +2157,53 @@ document.addEventListener('drop', e => { if (!hasFiles(e)) return; e.preventDefa
 
 window.addEventListener('hashchange', route);
 navigator.serviceWorker?.getRegistrations?.().then(rs => rs.forEach(r => r.unregister())).catch(() => {});
+/* ---------- hide sensitive data ----------
+   A visual privacy screen for when someone can see the monitor: dollar amounts, customer names, emails and phone numbers are blurred
+   on every page. It does not change or remove any data, and printing, CSV exports and backups are not affected. */
+const PRIV = 'ptb-bench-crm-privacy';
+const priv = {on:false, raf:0};
+try { priv.on = localStorage.getItem(PRIV) === '1'; } catch(e) {}
+const rxEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function privRegex(){
+  const names = new Set();
+  for (const r of db.records.customers) for (const k of ['name', 'company']){ const v = String(r.data[k] || '').trim(); if (v.length >= 5 || /\s/.test(v)) names.add(v); }
+  const parts = ['(-?\\$\\s?\\d[\\d,]*(?:\\.\\d+)?)', '([\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+)', '(\\(?\\d{3}\\)?[\\s.-]\\d{3}[\\s.-]\\d{4})'];
+  if (names.size) parts.push('(?<![\\w])(' + [...names].sort((a, b) => b.length - a.length).map(rxEsc).join('|') + ')(?![\\w])');
+  return new RegExp(parts.join('|'), 'gi');
+}
+const privField = (ent, f) => !!f && (['currency', 'email', 'phone'].includes(f.type) || (f.type === 'relation' && f.target === 'customers') || (ent === 'customers' && ['name', 'company', 'address'].includes(f.id)));
+function privScan(root){
+  if (!priv.on || !db || !root) return;
+  for (const el of $$('input,select,textarea', root)){
+    const form = el.closest('form'), ent = form ? (form.dataset.ent || (form.id === 'revform' ? 'expenses' : '')) : '';
+    el.classList.toggle('sx-in', el.classList.contains('li-p') || (!!ent && /^f_/.test(el.name || '') && privField(ent, fld(ent, el.name.slice(2)))));
+  }
+  const rx = privRegex(), hits = [], walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {acceptNode: n =>
+    n.nodeValue.trim() && !n.parentElement.closest('.sx,script,style,textarea,option') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT});
+  for (let n; (n = walker.nextNode());){ rx.lastIndex = 0; if (rx.test(n.nodeValue)) hits.push(n); }
+  for (const n of hits){
+    const text = n.nodeValue, frag = document.createDocumentFragment(); let last = 0; rx.lastIndex = 0;
+    for (const m of text.matchAll(rx)){
+      if (m.index > last) frag.append(text.slice(last, m.index));
+      const s = document.createElement('span'); s.className = 'sx'; s.textContent = m[0]; frag.append(s); last = m.index + m[0].length;
+    }
+    if (last < text.length) frag.append(text.slice(last));
+    n.replaceWith(frag);
+  }
+}
+const privObs = new MutationObserver(() => { if (!priv.on || priv.raf) return; priv.raf = requestAnimationFrame(() => { priv.raf = 0; privRun(); }); });
+const privWatch = () => { for (const id of ['view', 'dlg']){ const el = document.getElementById(id); if (el) privObs.observe(el, {childList:true, subtree:true, characterData:true}); } };
+function privRun(){ privObs.disconnect(); try { privScan($('#view')); privScan($('#dlg')); } finally { privWatch(); } }
+function setPriv(on){
+  priv.on = on; try { localStorage.setItem(PRIV, on ? '1' : '0'); } catch(e) {}
+  document.body.classList.toggle('priv', on);
+  const b = $('#privbtn'); if (b){
+    b.setAttribute('aria-pressed', String(on)); b.title = (on ? 'Show' : 'Hide') + ' sensitive data (Alt+H)';
+    b.innerHTML = icon(on ? 'eyeoff' : 'eye') + '<span>' + (on ? 'Data hidden' : 'Hide data') + '</span>';
+  }
+  if (on) privRun();
+}
+
 route();
+setPriv(priv.on);
 })();
