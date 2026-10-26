@@ -373,6 +373,46 @@ const shot = async (page, name, fullPage = false) => {
     assert.deepEqual(await page.$$eval('.li-c option', os => os.map(o => o.textContent)), ['Services: Labor', 'Parts: Hardware', 'Services: Software']);
   });
 
+  await step('Other income: its own tab under Expenses, nothing pre-filled, entries added by hand', async () => {
+    assert.equal(storedDb().records.income.length, 0, 'no entries are created for the owner');
+    await go('#/list/expenses'); assert.match(await page.innerText('nav.tabs'), /Other income/);
+    assert.ok(!/Other income/.test(await page.innerText('#rail')), 'it is not a separate item in the sidebar');
+    await go('#/list/income');
+    assert.match(await page.innerText('nav.tabs [aria-current=page]'), /Other income/); assert.match(await page.innerText('#view'), /No other income yet/);
+    assert.match(await page.innerText('#rail [aria-current=page]'), /Expenses/);
+    for (const [date, ref] of [['2026-06-05', 'ACH 0605'], ['2026-07-05', 'ACH 0705']]) {
+      await go('#/new/income'); await page.waitForSelector('#recform');
+      assert.equal(await page.inputValue('#f_category'), 'Grant or stipend'); assert.equal(await page.inputValue('#f_date'), new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10), 'date defaults to today, not a start date');
+      await page.fill('#f_source', 'City of Carrollton - Main Street Program'); await page.fill('#f_description', 'Business rent assistance');
+      await page.fill('#f_date', date); await page.fill('#f_amount', '500'); await page.selectOption('#f_payment_method', 'Bank transfer'); await page.fill('#f_reference', ref);
+      await page.click('#recform button[type=submit]'); await settle();
+    }
+    const rows = storedDb().records.income;
+    assert.equal(rows.length, 2); assert.deepEqual(rows.map(r => [r.data.date, r.data.amount, r.data.category, r.data.business]), [['2026-06-05', 500, 'Grant or stipend', 'Precision Tech Bench'], ['2026-07-05', 500, 'Grant or stipend', 'Precision Tech Bench']]);
+    await go('#/list/income'); await page.waitForSelector('#rows tr[data-href]');
+    assert.match(await page.innerText('#rowsum'), /Showing 2 totaling \$1,000\.00/); assert.equal(await page.$$eval('#rows tr[data-href]', r => r.length), 2);
+    await page.fill('[data-in=inf][data-k=from]', '2026-07-01'); await page.press('[data-in=inf][data-k=from]', 'Tab'); await page.waitForTimeout(200);
+    assert.match(await page.innerText('#rowsum'), /Showing 1 totaling \$500\.00/);
+    await page.fill('[data-in=inf][data-k=from]', ''); await page.press('[data-in=inf][data-k=from]', 'Tab'); await page.waitForTimeout(200);
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-act=inc-csv]')]);
+    const csv = fs.readFileSync(await dl.path(), 'utf8'); assert.match(csv, /2026-06-05,City of Carrollton - Main Street Program,Business rent assistance,Grant or stipend,Precision Tech Bench,500\.00/);
+    await shot(page, 'other-income-ledger');
+  });
+
+  await step('Profit & Loss lists other income below gross profit, apart from sales revenue, and adds it to net profit', async () => {
+    const stats = await setPnl('2026-01-01', '2026-12-31', 'accrual'); const t = await page.innerText('#pnlout .pnl');
+    assert.match(stats, /\$1,001\.00\s+revenue/, 'sales revenue is unchanged: ' + stats); assert.match(stats, /\$1,000\.00\s+other income/);
+    assert.match(t, /Gross profit\s+\$969\.50\s+Other income\s+Grant or stipend\s+\$1,000\.00\s+Total other income\s+\$1,000\.00\s+Operating expenses/, t);
+    assert.match(stats, /\$1,969\.50\s+net profit/, stats);
+    assert.match(stats, /98\.4%\s+margin/, 'margin is net profit over sales plus other income: ' + stats);
+    assert.match(await page.innerText('#pnlout'), /2 other income entries/);
+    await shot(page, 'other-income-pnl');
+    assert.match(await setPnl('2026-01-01', '2026-12-31', 'cash'), /\$1,000\.00\s+other income/, 'same on a cash basis');
+    const june = await setPnl('2026-06-01', '2026-06-30', 'accrual'); assert.match(june, /\$500\.00\s+other income/);
+    const early = await setPnl('2026-01-01', '2026-05-31', 'accrual'); assert.ok(!/other income/.test(early), 'no Other income section when nothing was received in the period: ' + early);
+    assert.ok(!/Other income/.test(await page.innerText('#pnlout .pnl')));
+  });
+
   await step('Hide data button: top-right on every page, blurs amounts, customer names, emails and phones, and remembers its state', async () => {
     const names = custs().map(c => c.data.name), jane = custs().find(c => c.data.name === 'Jane Doe'), anyInv = inv('1001');
     const leaks = () => page.evaluate(names => {
@@ -394,7 +434,7 @@ const shot = async (page, name, fullPage = false) => {
     await page.click('#privbtn'); await page.waitForTimeout(150);
     assert.equal(await page.getAttribute('#privbtn', 'aria-pressed'), 'true'); assert.match(await page.innerText('#privbtn'), /Data hidden/);
     await shot(page, 'privacy-on-dashboard');
-    const pages = ['#/', '#/list/customers', '#/rec/customers/' + jane.id, '#/list/invoices', '#/rec/invoices/' + anyInv.id, '#/list/expenses', '#/pnl', '#/list/followups', '#/list/tickets', '#/invoices/review', '#/new/invoices'];
+    const pages = ['#/', '#/list/customers', '#/rec/customers/' + jane.id, '#/list/invoices', '#/rec/invoices/' + anyInv.id, '#/list/expenses', '#/list/income', '#/pnl', '#/list/followups', '#/list/tickets', '#/invoices/review', '#/new/invoices'];
     for (const p of pages){ await go(p); await page.waitForTimeout(200); assert.deepEqual(await leaks(), [], p + ' shows sensitive data while hidden'); }
     await go('#/list/invoices'); await page.waitForSelector('#rows tr[data-href]'); await page.waitForTimeout(200);
     assert.match(await blurred('#rows .sx'), /blur/); await shot(page, 'privacy-on-invoices');
@@ -429,6 +469,7 @@ const shot = async (page, name, fullPage = false) => {
     db.schema.invoices.fields = fs_.filter(f => f.id !== 'reference' && f.id !== 'pdf');
     db.schema.invoices.fields.find(f => f.id === 'status').options = ['Draft', 'Sent', 'Paid', 'Closed', 'Void'];
     db.schema.expenses.fields = db.schema.expenses.fields.filter(f => f.id !== 'invoice');
+    delete db.schema.income; delete db.records.income; delete db.counters.income;
     db.meta.mig = db.meta.mig.filter(k => k !== 'inv_scan' && k !== 'exp_invoice');
     gh.files.set(DATA_PATH, { content: Buffer.from(sealData(db)).toString('base64'), sha: sha1('old' + Date.now()) });
     await page.reload(); await page.fill('input[name=u]', USER); await page.fill('input[name=p]', PASS); await page.click('button[type=submit]');
@@ -436,6 +477,8 @@ const shot = async (page, name, fullPage = false) => {
     await go('#/fields/invoices');
     const t = await page.innerText('#view'); assert.match(t, /Original invoice number/); assert.match(t, /Source PDF/);
     await go('#/fields/expenses'); assert.match(await page.innerText('#view'), /Billable to invoice/);
+    await go('#/list/income'); assert.match(await page.innerText('#view'), /Other income/); assert.match(await page.innerText('#view'), /No other income yet/, 'an older file starts with an empty Other income ledger');
+    await go('#/new/income'); await page.waitForSelector('#f_source'); assert.equal(await page.inputValue('#f_category'), 'Grant or stipend');
     await go('#/list/invoices'); await page.waitForSelector('#rows tr[data-href]');
     assert.ok((await page.$$eval('[data-in=filter] option', os => os.map(o => o.textContent))).includes('Needs Review'), 'Needs Review is offered as a status');
     assert.equal(await page.$$eval('#rows tr[data-href]', r => r.length), before);

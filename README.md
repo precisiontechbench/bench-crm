@@ -26,6 +26,12 @@ Expenses has four tabs: **Ledger**, **Scan receipts**, **Needs review**, **Profi
 
 **Profit & Loss** counts only Posted expenses for the first business in the list (Precision Tech Bench), because it is built from this shop's invoices.
 
+## Other income (grants, stipends, refunds)
+
+**Expenses > Other income** records money you received that is not a customer invoice, such as the Main Street Program rent stipend. Add each payment yourself with **New income entry**: source, what it is for, date received, type (Grant or stipend, Rebate or refund, Interest, Other), amount, how it was received and a reference number. Nothing is created for you. The list can be searched, filtered by date and exported to CSV.
+
+On the **Profit & Loss** report it appears in its own **Other income** section just below gross profit, apart from sales revenue, on the day it was received (cash or accrual basis). It is added into net profit, and the profit margin is net profit over sales plus other income. The section only shows in periods that have an entry. Whether a payment is income or a rent offset is a tax question: have your CPA confirm it.
+
 ## Hide data button
 
 The pill in the very top-right corner of every page (**Hide data** / **Data hidden**, or `Alt+H`) blurs sensitive information when someone else can see the screen: dollar amounts, customer names and companies, email addresses and phone numbers, in lists, forms, reports and the dashboard. Click it again to show everything. The choice is remembered in this browser, including across a lock or reload.
