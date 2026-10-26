@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 const KEY = 'ptb-bench-crm';
-const ENTS = ['customers','assets','tickets','estimates','invoices','services','expenses','followups'];
+const ENTS = ['customers','assets','tickets','estimates','invoices','services','expenses','followups','income'];
 const $ = (s, el=document) => el.querySelector(s);
 const $$ = (s, el=document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -120,6 +120,16 @@ const DEFAULT_SCHEMA = {
     F('pdf','Source PDF','text',{list:true,locked:true,hint:'Set by the receipt scanner. The original PDF is kept encrypted in your data repository.'}),
     F('receipt','Receipt link','url'),
     F('notes','Notes','textarea')]},
+  income:{label:'Other income', singular:'Income entry', prefix:'INC', fields:[
+    F('source','Source','text',{required:true,list:true,title:true,locked:true,hint:'Who paid it, such as a grant program or a refund.'}),
+    F('description','What it is for','text',{list:true,title:true}),
+    F('date','Date received','date',{required:true,list:true,locked:true,default:'today'}),
+    F('category','Type','select',{list:true,default:'Grant or stipend',options:['Grant or stipend','Rebate or refund','Interest','Other']}),
+    F('business','Business','select',{list:true,default:BUSINESSES[0],options:BUSINESSES,hint:'Only the first business is counted on the Profit & Loss report.'}),
+    F('amount','Amount','currency',{required:true,list:true,locked:true}),
+    F('payment_method','Received by','select',{options:['Check','Bank transfer','Cash','Zelle','Other']}),
+    F('reference','Check or reference number','text'),
+    F('notes','Notes','textarea')]},
   followups:{label:'Follow-ups', singular:'Follow-up', prefix:'F', fields:[
     F('subject','Subject','text',{required:true,list:true,title:true}),
     F('customer','Customer','relation',{target:'customers',list:true,locked:true}),
@@ -149,8 +159,8 @@ const icon = k => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[
 /* ---------- storage ---------- */
 function freshDb(){
   return { v:1, schema:clone(DEFAULT_SCHEMA),
-    records:{customers:[],assets:[],tickets:[],estimates:[],invoices:[],services:[],expenses:[],followups:[]},
-    counters:{customers:1000,assets:1000,tickets:1000,estimates:1000,invoices:1000,services:1000,expenses:1000,followups:1000},
+    records:{customers:[],assets:[],tickets:[],estimates:[],invoices:[],services:[],expenses:[],followups:[],income:[]},
+    counters:{customers:1000,assets:1000,tickets:1000,estimates:1000,invoices:1000,services:1000,expenses:1000,followups:1000,income:1000},
     meta:{updated:0, configUpdated:0, mig:['phone_mobile','fu_invoice','inv_terms','exp_ledger','exp_schedc','inv_scan','exp_invoice']},
     vendorCats:{}, secrets:{anthropicKey:'', t:0},
     settings:{ shopName:'Precision Tech Bench', shopLine:'439 Main Street, Carrollton, KY 41008',
@@ -562,7 +572,8 @@ async function doSecurity(form){
 
 /* ---------- navigation ---------- */
 function renderRail(active){
-  const items = [['bench','#/','Bench'], ...ENTS.map(e => [e, '#/list/'+e, sch(e).label]), ['settings','#/settings','Settings']];
+  if (active === 'income') active = 'expenses';
+  const items = [['bench','#/','Bench'], ...ENTS.filter(e => e !== 'income').map(e => [e, '#/list/'+e, sch(e).label]), ['settings','#/settings','Settings']];
   $('#rail').innerHTML = `<div class="brand"><b>Bench CRM</b><span>${h(db.settings.shopName)}</span></div>` +
     items.map(([k,href,lab]) => `<a href="${href}" ${k===active?'aria-current="page"':''}>${icon(k)}<span>${h(lab)}</span></a>`).join('') +
     `<div class="spacer"></div><div class="syncstat" id="syncstat" aria-live="polite"></div><div class="keys"><kbd>N</kbd>new<br><kbd>/</kbd>search<br><kbd>Ctrl</kbd><kbd>S</kbd>save<br><kbd>Alt</kbd><kbd>1</kbd>–<kbd>9</kbd>sections</div><button data-act="lock">Lock</button>`;
@@ -635,10 +646,11 @@ function viewBench(){
 
 /* ---------- lists ---------- */
 const ui = { q:{}, sort:{}, filter:{ tickets:'__open', followups:'__open', services:'__open' } };
-ui.sort.expenses = {k:'date', dir:-1};
+ui.sort.expenses = {k:'date', dir:-1}; ui.sort.income = {k:'date', dir:-1};
 function viewList(ent){
   const sc = sch(ent); const cols = sc.fields.filter(f => f.list);
   if (ent === 'expenses') return viewLedger();
+  if (ent === 'income') return viewIncome();
   const sf = sc.fields.find(f => f.id==='status' && f.type==='select');
   const s = ui.sort[ent] || {k:'no', dir:-1};
   const fv = ui.filter[ent] || '';
@@ -661,11 +673,11 @@ function listTable(ent){
 // Rows after the search box, filters and sort. The expense ledger and its CSV export share this.
 function listRows(ent){
   const sc = sch(ent);
-  let rows = ent === 'expenses' ? expFiltered() : db.records[ent].slice();
+  let rows = ent === 'expenses' ? expFiltered() : ent === 'income' ? incFiltered() : db.records[ent].slice();
   const q = (ui.q[ent]||'').toLowerCase().trim();
   if (q) rows = rows.filter(r => (tagOf(ent,r) + ' ' + sc.fields.map(f => fmt(f, r.data[f.id])).join(' ') + ' ' + digits(r.data.phone)).toLowerCase().includes(q));
   const fv = ui.filter[ent];
-  if (ent !== 'expenses'){ if (fv === '__open') rows = rows.filter(r => !isClosed(ent, r)); else if (fv) rows = rows.filter(r => r.data.status === fv); }
+  if (ent !== 'expenses' && ent !== 'income'){ if (fv === '__open') rows = rows.filter(r => !isClosed(ent, r)); else if (fv) rows = rows.filter(r => r.data.status === fv); }
   if (ent === 'invoices') rows = filterInvoices(rows);
   const s = ui.sort[ent] || {k:'no', dir:-1};
   const f = fld(ent, s.k);
@@ -683,6 +695,7 @@ function fillRows(ent){
   const sc = sch(ent); const cols = sc.fields.filter(f => f.list);
   const rows = listRows(ent);
   if (ent === 'expenses') fillExpSummary(rows);
+  if (ent === 'income') fillIncSummary(rows);
   const sum = ent === 'invoices' ? $('#rowsum') : null; if (sum){
     const tot = k => money(rows.reduce((a,r) => a + (+r.data[k] || 0), 0));
     sum.textContent = rows.length ? ` · showing ${rows.length}: billed ${tot('total')}, balance due ${tot('balance')}` : '';
@@ -1171,6 +1184,11 @@ function pnlPeriod(from, to){
     rev += (+D.subtotal || 0) * share; tax += (+D.tax || 0) * share; nInv++;
     for (const [c, v] of Object.entries(revenueByCat(D))) revBy[c] = (revBy[c] || 0) + v * share;
   }
+  const incBy = {}; let nInc = 0;
+  for (const r of db.records.income){   // other income counts on the day it was received, on either basis
+    const D = r.data, amt = +D.amount || 0; if (incBiz(r) !== shopBiz() || !inR(D.date) || !amt) continue;
+    const c = D.category || 'Other'; incBy[c] = (incBy[c] || 0) + amt; nInc++;
+  }
   const cogsCats = db.settings.cogsCats || [], cogsBy = {}, cats = {}; let nExp = 0;
   for (const r of db.records.expenses){
     const D = r.data; if (expStatus(r) !== 'Posted' || expBiz(r) !== shopBiz() || !inR(D.date)) continue;
@@ -1182,8 +1200,9 @@ function pnlPeriod(from, to){
   for (const c of Object.keys(revBy)) revBy[c] = round2(revBy[c]);
   const off = round2(rev - sum(revBy)), top = Object.keys(revBy).sort((a, b) => revBy[b] - revBy[a])[0];
   if (top && off) revBy[top] = round2(revBy[top] + off);   // keep the categories adding up to the revenue total to the cent
-  const cogs = sum(cogsBy), opex = sum(cats);
-  return {rev, revBy, tax, cogs, cogsBy, cats, opex, gross:round2(rev - cogs), net:round2(rev - cogs - opex), nInv, nExp};
+  for (const c of Object.keys(incBy)) incBy[c] = round2(incBy[c]);
+  const cogs = sum(cogsBy), opex = sum(cats), other = sum(incBy);
+  return {rev, revBy, tax, cogs, cogsBy, cats, opex, incBy, other, gross:round2(rev - cogs), net:round2(rev - cogs + other - opex), nInv, nExp, nInc};
 }
 function pnlColumns(from, to){
   if (!pnl.monthly) return [{label:'Total', from, to}];
@@ -1200,7 +1219,7 @@ function pnlReport(){
   const cols = pnlColumns(from, to).map(c => ({...c, ...pnlPeriod(c.from, c.to)}));
   const names = k => [...new Set(cols.flatMap(c => Object.keys(c[k])))].sort((a,b) => a.localeCompare(b));
   const order = incomeCats(), revNames = names('revBy').sort((a, b) => (order.indexOf(a) < 0 ? 99 : order.indexOf(a)) - (order.indexOf(b) < 0 ? 99 : order.indexOf(b)) || a.localeCompare(b));
-  return {from, to, cols, revNames, cogsNames:names('cogsBy'), catNames:names('cats')};
+  return {from, to, cols, revNames, incNames:names('incBy'), cogsNames:names('cogsBy'), catNames:names('cats')};
 }
 function pnlRows(R){
   const row = (label, f, cls='') => ({label, cls, v:R.cols.map(f)});
@@ -1209,9 +1228,10 @@ function pnlRows(R){
     rows.push({label:'Cost of goods', cls:'hd', v:[]}, ...R.cogsNames.map(n => row(n, c => c.cogsBy[n] || 0, 'ind')), row('Total cost of goods', c => c.cogs, 'sum'));
   }
   rows.push(row('Gross profit', c => c.gross, 'total'));
+  if (R.incNames.length) rows.push({label:'Other income', cls:'hd', v:[]}, ...R.incNames.map(n => row(n, c => c.incBy[n] || 0, 'ind')), row('Total other income', c => c.other, 'sum'));
   rows.push({label:'Operating expenses', cls:'hd', v:[]}, ...R.catNames.map(n => row(n, c => c.cats[n] || 0, 'ind')), row('Total operating expenses', c => c.opex, 'sum'));
   rows.push(row('Net profit', c => c.net, 'total'));
-  rows.push({...row('Profit margin', c => c.rev ? c.net / c.rev * 100 : null, 'memo'), pct:true});
+  rows.push({...row('Profit margin', c => c.rev + c.other ? c.net / (c.rev + c.other) * 100 : null, 'memo'), pct:true});
   rows.push(row('Sales tax collected (not counted as revenue)', c => c.tax, 'memo'));
   return rows;
 }
@@ -1239,12 +1259,12 @@ function fillPnl(){
   const R = pnlReport();
   if (R.bad){ out.innerHTML = '<div class="panel empty">The start date is after the end date.</div>'; return; }
   const T = R.cols[R.cols.length - 1], plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
-  out.innerHTML = `<div class="stats"><div><b>${money(T.rev)}</b>revenue</div><div><b>${money(T.cogs + T.opex)}</b>expenses</div>
-      <div><b style="color:${T.net < 0 ? 'var(--danger)' : 'var(--ok)'}">${money(T.net)}</b>net ${T.net < 0 ? 'loss' : 'profit'}</div><div><b>${T.rev ? (T.net / T.rev * 100).toFixed(1) + '%' : '-'}</b>margin</div></div>
+  out.innerHTML = `<div class="stats"><div><b>${money(T.rev)}</b>revenue</div>${T.other ? `<div><b>${money(T.other)}</b>other income</div>` : ''}<div><b>${money(T.cogs + T.opex)}</b>expenses</div>
+      <div><b style="color:${T.net < 0 ? 'var(--danger)' : 'var(--ok)'}">${money(T.net)}</b>net ${T.net < 0 ? 'loss' : 'profit'}</div><div><b>${T.rev + T.other ? (T.net / (T.rev + T.other) * 100).toFixed(1) + '%' : '-'}</b>margin</div></div>
     <div class="panel pnlwrap">${pnlTable(R)}</div>
-    <p class="meta" style="margin-top:.8rem">${plural(T.nInv, 'invoice')} and ${plural(T.nExp, 'expense')} in this period. ${pnl.basis === 'cash'
+    <p class="meta" style="margin-top:.8rem">${plural(T.nInv, 'invoice')}${T.nInc ? ', ' + T.nInc + (T.nInc === 1 ? ' other income entry' : ' other income entries') : ''} and ${plural(T.nExp, 'expense')} in this period. ${pnl.basis === 'cash'
       ? 'Cash basis: counts money actually received, on the day it was paid. A partly paid invoice counts only the paid part.'
-      : 'Accrual basis: counts each invoice on its issue date whether or not it is paid. Drafts and voided invoices are left out.'} Revenue is split by the Category on each invoice line, and sales tax is not income, so it is left out. Expenses and invoices waiting in a review queue, and expenses for other businesses, are left out.</p>`;
+      : 'Accrual basis: counts each invoice on its issue date whether or not it is paid. Drafts and voided invoices are left out.'} Revenue is split by the Category on each invoice line, and sales tax is not income, so it is left out. Other income, such as a grant or stipend, is added below gross profit on the day it was received. Expenses and invoices waiting in a review queue, and expenses for other businesses, are left out.</p>`;
 }
 function printPnl(){
   const R = pnlReport(); if (R.bad){ toast('The start date is after the end date.'); return; }
@@ -1305,7 +1325,7 @@ function expFiltered(){
 const expTabs = cur => {
   const n = db ? pendingRows().length : 0;
   return `<nav class="tabs" aria-label="Expenses"><a href="#/list/expenses" ${cur==='list'?'aria-current="page"':''}>Ledger</a><a href="#/expenses/scan" ${cur==='scan'?'aria-current="page"':''}>Scan receipts</a>
-    <a href="#/expenses/review" ${cur==='review'?'aria-current="page"':''}>Needs review${n ? ` <span class="count">${n}</span>` : ''}</a><a href="#/pnl" ${cur==='pnl'?'aria-current="page"':''}>Profit &amp; Loss</a></nav>`;
+    <a href="#/expenses/review" ${cur==='review'?'aria-current="page"':''}>Needs review${n ? ` <span class="count">${n}</span>` : ''}</a><a href="#/list/income" ${cur==='income'?'aria-current="page"':''}>Other income</a><a href="#/pnl" ${cur==='pnl'?'aria-current="page"':''}>Profit &amp; Loss</a></nav>`;
 };
 function viewLedger(){
   const sc = sch('expenses'), cat = fld('expenses','category'), biz = fld('expenses','business');
@@ -1356,6 +1376,34 @@ function expCatCsv(){
     ['All shown', String(rows.length), round2(by.reduce((a,[,b]) => a + b.sub, 0)), round2(by.reduce((a,[,b]) => a + b.tax, 0)), round2(by.reduce((a,[,b]) => a + b.total, 0)), round2(by.reduce((a,[,b]) => a + b.ded, 0))],
     [], [CPA_NOTE]];
   download(`expense-totals-${today()}.csv`, '﻿' + lines.map(l => l.map(csvCell).join(',')).join('\r\n'), 'text/csv');
+}
+
+/* other income: money received that is not an invoice, such as a grant or stipend */
+const inf = {from:'', to:''};
+const incBiz = r => r.data.business || shopBiz();
+function incFiltered(){
+  let rows = db.records.income.slice();
+  if (inf.from || inf.to) rows = rows.filter(r => r.data.date && (!inf.from || r.data.date >= inf.from) && (!inf.to || r.data.date <= inf.to));
+  return rows;
+}
+function viewIncome(){
+  const sc = sch('income');
+  return `${expTabs('income')}<div class="head"><div><h1>${h(sc.label)}</h1><p>Money you received that is not a customer invoice, such as a grant or stipend. It is listed under Other income on the Profit &amp; Loss report, apart from sales.<span id="rowsum"></span></p></div>
+    <div class="row"><button class="btn small" data-act="inc-csv">Export CSV</button><a class="btn small" href="#/fields/income">Edit fields</a><a class="btn primary" href="#/new/income">New income entry</a></div></div>
+    <div class="toolbar"><input type="search" placeholder="Search other income" aria-label="Search" data-in="search" data-ent="income" value="${h(ui.q.income||'')}">
+      <label class="f" style="flex-direction:row; align-items:center; gap:.4rem">From<input type="date" data-in="inf" data-k="from" value="${h(inf.from)}" aria-label="From date" style="width:auto"></label>
+      <label class="f" style="flex-direction:row; align-items:center; gap:.4rem">To<input type="date" data-in="inf" data-k="to" value="${h(inf.to)}" aria-label="To date" style="width:auto"></label></div>
+    ${listTable('income')}`;
+}
+function fillIncSummary(rows){
+  const sum = $('#rowsum'); if (sum) sum.textContent = rows.length ? ` Showing ${rows.length} totaling ${money(round2(rows.reduce((s, r) => s + (+r.data.amount || 0), 0)))}.` : '';
+}
+function incCsv(){
+  const rows = listRows('income').sort((a, b) => String(a.data.date || '').localeCompare(String(b.data.date || '')) || a.no - b.no);
+  if (!rows.length){ toast('No other income matches the current filters'); return; }
+  const lines = [['Date received','Source','What it is for','Type','Business','Amount','Received by','Check or reference number','Notes','Record'],
+    ...rows.map(r => { const D = r.data; return [D.date || '', D.source || '', D.description || '', D.category || '', incBiz(r), +D.amount || 0, D.payment_method || '', D.reference || '', D.notes || '', tagOf('income', r)]; })];
+  download(`other-income-${today()}.csv`, '﻿' + lines.map(l => l.map(csvCell).join(',')).join('\r\n'), 'text/csv');
 }
 
 /* encrypted PDF storage: <data folder>/receipts/<id>.pdf.enc in the private data repository */
@@ -2020,6 +2068,7 @@ document.addEventListener('click', e => {
   else if (act === 'pnl-print') printPnl();
   else if (act === 'pnl-csv') pnlCsv();
   else if (act === 'exp-csv') expCsv();
+  else if (act === 'inc-csv') incCsv();
   else if (act === 'exp-cat-csv') expCatCsv();
   else if (act === 'scan-pick') $('#scanfiles')?.click();
   else if (act === 'scan-retry'){ const it = scan.items.find(x => x.id === t.dataset.id); if (it){ Object.assign(it, {state:'queued', pct:0, msg:'Waiting in line'}); renderScan(); scanPump(); } }
@@ -2116,6 +2165,7 @@ document.addEventListener('change', e => {
       route(); break; }
     case 'inccats': { const l = [...new Set(t.value.split(/[,\n]/).map(x => x.trim()).filter(Boolean))];
       if (l.length){ db.settings.incomeCats = l; save(); toast('Saved'); } else toast('Keep at least one income category.'); route(); break; }
+    case 'inf': inf[k] = t.value; route(); break;
     case 'scanbiz': scan.biz = t.value; break;
     case 'scanfiles': scanAdd([...t.files], t.dataset.kind); t.value = ''; break;
     case 'terms': { const form = t.closest('form'); if (form) setDueFromTerms(form); break; }
