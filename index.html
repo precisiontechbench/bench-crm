@@ -190,6 +190,11 @@ body.priv .sx-in:not(:focus), body.priv input[type=email]:not(:focus), body.priv
 .lines .li-a{font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink)}
 input.calc{background:var(--sunk); font-weight:600; font-variant-numeric:tabular-nums}
 #print table.items th{width:auto}
+.batchbar{display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.5rem 1rem; position:sticky; top:0; z-index:5; background:var(--surface); border:1px solid var(--focus); border-radius:8px; padding:.55rem .85rem; margin-bottom:.6rem}
+.batchbar[hidden]{display:none}
+th.selcell,td.selcell{width:2.4rem; text-align:center; padding-left:.6rem; padding-right:.2rem}
+.selcell input{width:1.05rem; height:1.05rem; cursor:pointer}
+.batchpaid[hidden]{display:none}
 .invfilters{display:grid; grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr)); gap:.6rem .75rem; align-items:end}
 .invfilters .f.grow{grid-column:span 2}
 .invfilters input[type=search],.invfilters select{flex:none; width:100%; max-width:none}
@@ -249,7 +254,8 @@ table.pnl .neg{color:var(--danger)}
   .grid tbody tr{background:var(--surface); border:1px solid var(--line); border-radius:8px; margin-bottom:.6rem; padding:.4rem 0}
   .grid td{border:0; padding:.2rem .85rem; white-space:normal; max-width:none; display:flex; gap:.75rem}
   .grid td::before{content:attr(data-label); color:var(--muted); font-size:.85rem; min-width:7rem}
-  .grid td:first-child::before{content:none}
+  .grid td:first-child::before,.grid td.selcell + td::before{content:none}
+  .grid td.selcell{padding-bottom:0}
   dialog .formgrid{grid-template-columns:1fr}
 }
 @media (prefers-reduced-motion:reduce){#toast{transition:none}}
@@ -264,6 +270,7 @@ table.pnl .neg{color:var(--danger)}
   #print table.pnl td,#print table.pnl th{border:0; padding:2pt 5pt}
   #print table.pnl tr.sum td{border-top:1px solid #666} #print table.pnl tr.total td{border-top:2px solid #000}
   #print table.pnl .neg{color:#000}
+  #print .doc{break-after:page} #print .doc:last-child{break-after:auto}
   #print .sig{margin-top:28pt; display:flex; gap:24pt} #print .sig div{flex:1; border-top:1px solid #000; padding-top:3pt}
 }
 </style>

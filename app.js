@@ -665,7 +665,8 @@ function viewList(ent){
 }
 function listTable(ent){
   const cols = sch(ent).fields.filter(f => f.list), s = ui.sort[ent] || {k:'no', dir:-1};
-  return `<div class="tablewrap"><table class="grid"><thead><tr>
+  return `<div id="batchbar" class="batchbar" hidden></div><div class="tablewrap"><table class="grid"><thead><tr>
+      <th class="selcell"><input type="checkbox" data-in="selall" data-ent="${ent}" aria-label="Select all shown"></th>
       <th data-act="sort" data-ent="${ent}" data-k="no" ${s.k==='no' ? `aria-sort="${s.dir>0?'ascending':'descending'}"` : ''}>No.</th>
       ${cols.map(f => `<th data-act="sort" data-ent="${ent}" data-k="${f.id}" ${s.k===f.id ? `aria-sort="${s.dir>0?'ascending':'descending'}"` : ''}>${h(f.label)}</th>`).join('')}
     </tr></thead><tbody id="rows"></tbody></table></div>`;
@@ -701,10 +702,89 @@ function fillRows(ent){
     sum.textContent = rows.length ? ` · showing ${rows.length}: billed ${tot('total')}, balance due ${tot('balance')}` : '';
   }
   const tb = $('#rows'); if (!tb) return;
+  ui.shown[ent] = rows.map(r => r.id);
+  const sel = selSet(ent);
   tb.innerHTML = rows.length ? rows.map(r => `<tr data-href="#/rec/${ent}/${r.id}" tabindex="0">
+      <td class="selcell"><input type="checkbox" data-in="rowsel" data-ent="${ent}" data-id="${r.id}" ${sel.has(r.id) ? 'checked' : ''} aria-label="Select ${h(tagOf(ent,r))}"></td>
       <td><span class="tag">${h(tagOf(ent,r))}</span></td>
       ${cols.map(f => `<td data-label="${h(f.label)}">${cell(ent,f,r)}</td>`).join('')}</tr>`).join('')
-    : `<tr><td colspan="${cols.length+1}" class="empty">${db.records[ent].length ? 'No matches. Try a different search or filter.' : `No ${h(sc.label.toLowerCase())} yet.<br><a class="btn primary" href="#/new/${ent}">New ${h(sc.singular.toLowerCase())}</a>`}</td></tr>`;
+    : `<tr><td colspan="${cols.length+2}" class="empty">${db.records[ent].length ? 'No matches. Try a different search or filter.' : `No ${h(sc.label.toLowerCase())} yet.<br><a class="btn primary" href="#/new/${ent}">New ${h(sc.singular.toLowerCase())}</a>`}</td></tr>`;
+  refreshSel(ent);
+}
+
+/* ---------- batch actions: tick rows, then change status, print, export or delete ---------- */
+ui.sel = {}; ui.shown = {};
+const selSet = ent => ui.sel[ent] || (ui.sel[ent] = new Set());
+const BATCH_PRINT = ['invoices','estimates','tickets'];
+function selRecs(ent){
+  const sel = selSet(ent);
+  for (const id of [...sel]) if (!find(ent, id)) sel.delete(id);           // drop records deleted elsewhere
+  return [...sel].map(id => find(ent, id)).sort((a,b) => a.no - b.no);
+}
+const countOf = (n, ent) => `${n} ${n === 1 ? sch(ent).singular.toLowerCase() : sch(ent).label.toLowerCase()}`;
+// Syncs the select-all box and the action bar with the current selection.
+function refreshSel(ent){
+  const recs = selRecs(ent), shown = ui.shown[ent] || [], sel = selSet(ent);
+  const all = $('[data-in=selall]'); if (all){ const n = shown.filter(id => sel.has(id)).length; all.checked = !!shown.length && n === shown.length; all.indeterminate = n > 0 && n < shown.length; }
+  const bar = $('#batchbar'); if (!bar) return;
+  if (!recs.length){ bar.hidden = true; bar.innerHTML = ''; return; }
+  const hidden = recs.filter(r => !shown.includes(r.id)).length;
+  const sum = k => money(recs.reduce((a,r) => a + (+r.data[k] || 0), 0));
+  bar.hidden = false;
+  bar.innerHTML = `<div class="batchinfo"><b>${recs.length} selected</b>${hidden ? ` <span class="meta">(${hidden} hidden by the search or filters)</span>` : ''}
+      ${ent === 'invoices' ? `<span class="meta"> · billed ${sum('total')}, balance due ${sum('balance')}</span>` : ''}</div>
+    <div class="row">${fld(ent,'status') ? `<button class="btn small primary" data-act="batch-status" data-ent="${ent}">Change status…</button>` : ''}
+      ${BATCH_PRINT.includes(ent) ? `<button class="btn small" data-act="batch-print" data-ent="${ent}">Print selected</button>` : ''}
+      <button class="btn small" data-act="batch-csv" data-ent="${ent}">Export CSV</button>
+      <button class="btn small danger" data-act="batch-del" data-ent="${ent}">Delete…</button>
+      <button class="btn small" data-act="batch-clear" data-ent="${ent}">Clear</button></div>`;
+}
+function batchStatusDialog(ent){
+  const recs = selRecs(ent), sf = fld(ent, 'status'); if (!recs.length || !sf) return;
+  const opts = sf.options.filter(o => !(ent === 'estimates' && o === 'Converted'));
+  const dlg = $('#dlg'), inv = ent === 'invoices', pm = inv && fld(ent, 'payment_method');
+  dlg.innerHTML = `<form id="batchform" data-ent="${ent}"><h2>Change status of ${h(countOf(recs.length, ent))}</h2>
+    <div class="formgrid">
+      <label class="f wide">New status<select name="status" required data-in="batchstatus"><option value="">Choose a status</option>${opts.map(o => `<option>${h(o)}</option>`).join('')}</select></label>
+      ${inv ? `<div class="wide batchpaid" hidden><div class="formgrid">
+        <label class="f">Date paid<input type="date" name="paid_date" value="${today()}"></label>
+        ${pm ? `<label class="f">Paid with<select name="payment_method"><option value="">Leave as is</option>${pm.options.map(o => `<option>${h(o)}</option>`).join('')}</select></label>` : ''}
+        <p class="meta wide" style="margin:0">Each invoice is set to fully paid (amount paid becomes its total), so its balance due is $0.00.${db.settings.fuEnabled ? ' Automatic follow-ups are scheduled as usual.' : ''}</p></div></div>` : ''}
+    </div>
+    <div class="formfoot"><button class="btn primary" type="submit">Apply to ${recs.length}</button><button class="btn" type="button" data-act="dlg-close">Cancel</button></div></form>`;
+  dlg.showModal(); $('select[name=status]', dlg).focus();
+}
+function applyBatchStatus(form){
+  const ent = form.dataset.ent, E = form.elements, st = E.status.value; if (!st){ toast('Choose a status.'); return; }
+  const now = new Date().toISOString(); let changed = 0, same = 0, fu = 0;
+  for (const r of selRecs(ent)){
+    if (r.data.status === st){ same++; continue; }
+    r.data.status = st; r.updated = now; changed++;
+    if (ent === 'invoices' && st === 'Paid'){
+      computeTotals(ent, r.data);
+      if (fld(ent,'amount_paid') && (+r.data.amount_paid || 0) < (+r.data.total || 0)) r.data.amount_paid = r.data.total;
+      if (fld(ent,'paid_date')) r.data.paid_date = E.paid_date?.value || today();
+      if (E.payment_method?.value && fld(ent,'payment_method')) r.data.payment_method = E.payment_method.value;
+      computeTotals(ent, r.data);
+    }
+    if (ent === 'invoices' && scheduleInvoiceFollowups(r)) fu++;
+  }
+  $('#dlg').close();
+  if (changed) save();
+  toast(`${countOf(changed, ent)} set to ${st}${same ? `, ${same} already ${st}` : ''}${fu ? `. Follow-ups scheduled for ${fu}` : ''}`);
+  route();
+}
+function batchPrint(ent){
+  const recs = selRecs(ent); if (!recs.length) return;
+  $('#print').innerHTML = recs.map(r => ent === 'tickets' ? ticketHtml(r) : docHtml(ent, r)).join('');
+  printWhenReady();
+}
+function batchDelete(ent){
+  const recs = selRecs(ent); if (!recs.length) return;
+  if (!confirm(`Delete ${countOf(recs.length, ent)}? Linked records stay but will show as removed. GitHub keeps the earlier saved versions.`)) return;
+  const ids = new Set(recs.map(r => r.id));
+  tombstone([...ids]); db.records[ent] = db.records[ent].filter(r => !ids.has(r.id)); ids.forEach(id => selSet(ent).delete(id));
+  save(); toast(`Deleted ${countOf(ids.size, ent)}`); route();
 }
 
 /* ---------- invoice search: boolean name match and date ranges ---------- */
@@ -1106,11 +1186,11 @@ ${[['estimates','estDone','Finished estimate statuses'],['invoices','invDone','F
       <div class="row"><button class="btn" data-act="sample">Add sample records</button><button class="btn danger" data-act="wipe">Erase all data</button></div></section>
   </div>`;
 }
-function csvFor(ent){
+function csvFor(ent, ids){
   const fs = sch(ent).fields;
   const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
   const lines = [['No.', ...fs.map(f => f.label), 'Created'].map(q).join(',')];
-  for (const r of db.records[ent]) lines.push([tagOf(ent,r), ...fs.map(f => fmt(f, r.data[f.id])), r.created].map(q).join(','));
+  for (const r of db.records[ent]) if (!ids || ids.has(r.id)) lines.push([tagOf(ent,r), ...fs.map(f => fmt(f, r.data[f.id])), r.created].map(q).join(','));
   return lines.join('\r\n');
 }
 function sample(){
@@ -1980,6 +2060,10 @@ function importLead(L){
 /* ---------- print ---------- */
 function printDoc(ent, id){
   const r = find(ent, id); if (!r) return;
+  $('#print').innerHTML = docHtml(ent, r);
+  printWhenReady();
+}
+function docHtml(ent, r){
   const S = db.settings, c = find('customers', r.data.customer), sc = sch(ent), D = r.data;
   const items = Array.isArray(D.items) ? D.items : [];
   const money = v => fmt({type:'currency'}, v) || '$0.00';
@@ -1987,7 +2071,7 @@ function printDoc(ent, id){
     .filter(([k]) => D[k] && fld(ent,k)).map(([k,l]) => `<div><b>${l}:</b> ${h(fmt({type:'date'}, D[k]))}</div>`).join('');
   const totals = [['subtotal','Subtotal'],['tax',`Tax${D.tax_rate ? ' (' + D.tax_rate + '%)' : ''}`],['total','Total'],['amount_paid','Paid'],['balance','Balance due']]
     .filter(([k]) => fld(ent,k) && (k!=='amount_paid' || +D.amount_paid)).map(([k,l]) => `<tr><td colspan="3" style="text-align:right;border:0">${h(l)}</td><td style="text-align:right;${k==='total'||k==='balance'?'font-weight:700':''}">${money(D[k])}</td></tr>`).join('');
-  $('#print').innerHTML = `<div style="display:flex;justify-content:space-between;gap:24pt"><div style="display:flex;align-items:center;gap:12pt"><img src="logo.png" alt="" class="logo"><div><h1>${h(S.shopName)}</h1><p>${h(S.shopLine)}</p></div></div>
+  return `<section class="doc"><div style="display:flex;justify-content:space-between;gap:24pt"><div style="display:flex;align-items:center;gap:12pt"><img src="logo.png" alt="" class="logo"><div><h1>${h(S.shopName)}</h1><p>${h(S.shopLine)}</p></div></div>
       <div style="text-align:right"><h2 style="font-size:16pt;margin:0">${h(sc.singular.toUpperCase())}</h2><p style="margin:.2em 0">${h(tagOf(ent,r))}</p>${D.status ? `<p style="margin:0">${h(D.status)}</p>` : ''}</div></div>
     <div style="display:flex;justify-content:space-between;gap:24pt;margin:12pt 0"><div><b>Bill to</b><br>${c ? h(label('customers',c)) : ''}${c && c.data.address ? '<br>' + h(c.data.address).replace(/\n/g,'<br>') : ''}${c ? '<br>' + h([fmt({type:'phone'}, c.data.phone), c.data.email].filter(Boolean).join('  |  ')) : ''}</div><div style="text-align:right">${dates}</div></div>
     ${D.title ? `<p><b>${h(D.title)}</b></p>` : ''}
@@ -1995,8 +2079,7 @@ function printDoc(ent, id){
     <tbody>${items.map(l => `<tr><td>${h(l.d)}${l.t === false ? ' <small>(non-taxable)</small>' : ''}</td><td style="text-align:right">${h(l.q)}</td><td style="text-align:right">${money(l.p)}</td><td style="text-align:right">${money(round2(l.q*l.p))}</td></tr>`).join('')}${totals}</tbody></table>
     ${D.payment_method && D.status === 'Paid' ? `<p>Paid by ${h(D.payment_method)}.</p>` : ''}
     ${D.notes ? `<p style="white-space:pre-wrap">${h(D.notes)}</p>` : ''}
-    ${ent === 'estimates' ? `<p style="font-size:9.5pt">This is an estimate, not a bill. Final cost may change if we find something unexpected; we'll check with you first.</p><div class="sig"><div>Approved by</div><div>Date</div></div>` : `<p style="margin-top:14pt">${h(S.invoiceNote || '')}</p>`}`;
-  printWhenReady();
+    ${ent === 'estimates' ? `<p style="font-size:9.5pt">This is an estimate, not a bill. Final cost may change if we find something unexpected; we'll check with you first.</p><div class="sig"><div>Approved by</div><div>Date</div></div>` : `<p style="margin-top:14pt">${h(S.invoiceNote || '')}</p>`}</section>`;
 }
 function printWhenReady(){
   const logo = $('#print img.logo');
@@ -2039,22 +2122,25 @@ function emailDoc(ent, id){
 }
 function printTicket(id){
   const r = find('tickets', id); if (!r) return;
+  $('#print').innerHTML = ticketHtml(r);
+  printWhenReady();
+}
+function ticketHtml(r){
   const S = db.settings; const c = find('customers', r.data.customer); const a = find('assets', r.data.asset);
   const rows = sch('tickets').fields.filter(f => f.type!=='relation' && r.data[f.id] !== undefined && r.data[f.id] !== '')
     .map(f => `<tr><th>${h(f.label)}</th><td style="white-space:pre-wrap">${h(fmt(f, r.data[f.id]))}</td></tr>`).join('');
-  $('#print').innerHTML = `<div style="display:flex;align-items:center;gap:12pt"><img src="logo.png" alt="" class="logo"><div><h1>${h(S.shopName)}</h1><p>${h(S.shopLine)}</p></div></div>
+  return `<section class="doc"><div style="display:flex;align-items:center;gap:12pt"><img src="logo.png" alt="" class="logo"><div><h1>${h(S.shopName)}</h1><p>${h(S.shopLine)}</p></div></div>
     <h2 style="font-size:14pt">Work order ${h(tagOf('tickets',r))}</h2>
     <table><tr><th>Customer</th><td>${c ? h(label('customers',c)) + '<br>' + h([fmt({type:'phone'}, c.data.phone), c.data.email].filter(Boolean).join('  |  ')) : ''}</td></tr>
     <tr><th>Device</th><td>${a ? h(label('assets',a)) + (a.data.serial ? '<br>S/N ' + h(a.data.serial) : '') : ''}</td></tr>${rows}</table>
     <p style="margin-top:14pt;font-size:9.5pt">${h(S.terms)}</p>
-    <div class="sig"><div>Customer signature</div><div>Date</div><div>Technician</div></div>`;
-  printWhenReady();
+    <div class="sig"><div>Customer signature</div><div>Date</div><div>Technician</div></div></section>`;
 }
 
 /* ---------- events ---------- */
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-act]');
-  if (!t) { const row = e.target.closest('[data-href]'); if (row && !e.target.closest('a')) location.hash = row.dataset.href; return; }
+  if (!t) { const row = e.target.closest('[data-href]'); if (row && !e.target.closest('a') && !e.target.closest('.selcell')) location.hash = row.dataset.href; return; }
   const {act, ent} = t.dataset;
   if (act === 'sort'){ const k = t.dataset.k, s = ui.sort[ent] || {k:'no',dir:-1}; ui.sort[ent] = {k, dir: s.k===k ? -s.dir : 1}; route(); }
   else if (act === 'del-rec'){ const r = find(ent, t.dataset.id);
@@ -2064,6 +2150,11 @@ document.addEventListener('click', e => {
   else if (act === 'print-doc') printDoc(ent, t.dataset.id);
   else if (act === 'email-doc') emailDoc(ent, t.dataset.id);
   else if (act === 'print-prices') printPrices();
+  else if (act === 'batch-status') batchStatusDialog(ent);
+  else if (act === 'batch-print') batchPrint(ent);
+  else if (act === 'batch-csv'){ const n = selRecs(ent).length; if (n) download(`${ent}-selected-${today()}.csv`, csvFor(ent, selSet(ent)), 'text/csv'); }
+  else if (act === 'batch-del') batchDelete(ent);
+  else if (act === 'batch-clear'){ selSet(ent).clear(); fillRows(ent); }
   else if (act === 'inv-clear'){ ui.inv = {name:'', field:ui.inv.field, preset:'', from:'', to:'', overdue:false}; ui.q.invoices = ''; ui.filter.invoices = ''; route(); }
   else if (act === 'pnl-print') printPnl();
   else if (act === 'pnl-csv') pnlCsv();
@@ -2146,6 +2237,9 @@ document.addEventListener('change', e => {
   const t = e.target, k = t.dataset.k;
   switch (t.dataset.in){
     case 'filter': ui.filter[t.dataset.ent] = t.value; fillRows(t.dataset.ent); break;
+    case 'rowsel': { const s = selSet(t.dataset.ent); t.checked ? s.add(t.dataset.id) : s.delete(t.dataset.id); refreshSel(t.dataset.ent); break; }
+    case 'selall': { const ent = t.dataset.ent, s = selSet(ent); (ui.shown[ent] || []).forEach(id => t.checked ? s.add(id) : s.delete(id)); $$('#rows input[data-in=rowsel]').forEach(c => { c.checked = t.checked; }); refreshSel(ent); break; }
+    case 'batchstatus': { const p = t.closest('form').querySelector('.batchpaid'); if (p) p.hidden = t.value !== 'Paid'; break; }
     case 'invdate': { const I = ui.inv;
       if (k === 'overdue') I.overdue = t.checked;
       else if (k === 'field') I.field = t.value;
@@ -2192,6 +2286,7 @@ document.addEventListener('change', e => {
 document.addEventListener('submit', e => {
   if (e.target.id === 'recform'){ e.preventDefault(); saveRecord(e.target); }
   else if (e.target.id === 'revform'){ e.preventDefault(); e.target.dataset.ent === 'invoices' ? invReviewSave(e.target, true) : reviewSave(e.target, true); }
+  else if (e.target.id === 'batchform'){ e.preventDefault(); applyBatchStatus(e.target); }
   else if (e.target.id === 'fldform'){ e.preventDefault(); saveField(e.target); }
   else if (e.target.id === 'loginform'){ e.preventDefault(); doLogin(e.target); }
   else if (e.target.id === 'setupform'){ e.preventDefault(); doSetup(e.target); }
