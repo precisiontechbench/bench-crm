@@ -195,6 +195,9 @@ input.calc{background:var(--sunk); font-weight:600; font-variant-numeric:tabular
 th.selcell,td.selcell{width:2.4rem; text-align:center; padding-left:.6rem; padding-right:.2rem}
 .selcell input{width:1.05rem; height:1.05rem; cursor:pointer}
 .batchpaid[hidden]{display:none}
+.secretbox{display:flex; flex-wrap:wrap; gap:.5rem; align-items:center}
+.secretbox > input{flex:1 1 14rem; min-width:0; font-family:ui-monospace,Consolas,monospace}
+.secretbox .secretmask{background:var(--sunk); letter-spacing:.1em}
 .invfilters{display:grid; grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr)); gap:.6rem .75rem; align-items:end}
 .invfilters .f.grow{grid-column:span 2}
 .invfilters input[type=search],.invfilters select{flex:none; width:100%; max-width:none}

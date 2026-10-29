@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 const KEY = 'ptb-bench-crm';
-const ENTS = ['customers','assets','tickets','estimates','invoices','services','expenses','followups','income'];
+const ENTS = ['customers','assets','tickets','estimates','invoices','services','expenses','followups','income','passwords'];
 const $ = (s, el=document) => el.querySelector(s);
 const $$ = (s, el=document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -17,7 +17,7 @@ const OLD_TO_SCHED_C = {'Parts & inventory':'Parts and inventory (COGS)','Tools 
 const BUSINESSES = ['Precision Tech Bench','Buzzinga Coffee'];
 const DEFAULT_MODEL = 'claude-sonnet-5-5';
 const CPA_NOTE = 'Tax categories are suggestions only (they follow IRS Schedule C). Have your CPA confirm them before you file.';
-const FIELD_TYPES = {text:'Short text', textarea:'Long text', number:'Number', currency:'Money', date:'Date', select:'Dropdown', checkbox:'Checkbox', phone:'Phone', email:'Email', url:'Web link', relation:'Link to record', lineitems:'Line items'};
+const FIELD_TYPES = {text:'Short text', textarea:'Long text', number:'Number', currency:'Money', date:'Date', select:'Dropdown', checkbox:'Checkbox', phone:'Phone', email:'Email', url:'Web link', relation:'Link to record', lineitems:'Line items', secret:'Hidden text (password)'};
 const F = (id,label,type,x={}) => ({id,label,type,...x});
 const DEFAULT_SCHEMA = {
   customers:{label:'Customers', singular:'Customer', prefix:'C', fields:[
@@ -130,6 +130,15 @@ const DEFAULT_SCHEMA = {
     F('payment_method','Received by','select',{options:['Check','Bank transfer','Cash','Zelle','Other']}),
     F('reference','Check or reference number','text'),
     F('notes','Notes','textarea')]},
+  passwords:{label:'Passwords', singular:'Login', prefix:'PW', fields:[
+    F('site','Site or app','text',{required:true,list:true,title:true,locked:true}),
+    F('url','Website address','url',{hint:'The login page, so the Open site button can take you there.'}),
+    F('username','Username or email','text',{list:true,locked:true}),
+    F('password','Password','secret',{list:true,locked:true,hint:'Encrypted with the rest of your data. Showing or copying it asks for your CRM password again.'}),
+    F('category','Category','select',{list:true,options:['Business','Vendor / supplier','Banking & finance','Email','Software & subscriptions','Website & hosting','Customer device','Social media','Other']}),
+    F('customer','Customer','relation',{target:'customers',locked:true,hint:'Only for a login that belongs to a customer.'}),
+    F('changed','Password last changed','date',{list:true,calc:true,locked:true,hint:'Updates by itself when you change the password.'}),
+    F('notes','Notes','textarea',{hint:'Recovery email, two-step sign-in notes, and so on.'})]},
   followups:{label:'Follow-ups', singular:'Follow-up', prefix:'F', fields:[
     F('subject','Subject','text',{required:true,list:true,title:true}),
     F('customer','Customer','relation',{target:'customers',list:true,locked:true}),
@@ -151,6 +160,7 @@ const ICON = {
   estimates:'<rect x="5" y="4" width="14" height="17" rx="1.5"/><path d="M9 4V2.5h6V4M8.5 10h7M8.5 14h4.5"/>',
   invoices:'<path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
   services:'<path d="M3.5 3.5h8l9 9-8 8-9-9z"/><circle cx="8" cy="8" r="1.5"/>',
+  passwords:'<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>',
   expenses:'<rect x="3" y="6" width="18" height="12" rx="1.5"/><circle cx="12" cy="12" r="2.5"/><path d="M6.5 9.5h0M17.5 14.5h0"/>',
   settings:'<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>'
 };
@@ -159,8 +169,8 @@ const icon = k => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[
 /* ---------- storage ---------- */
 function freshDb(){
   return { v:1, schema:clone(DEFAULT_SCHEMA),
-    records:{customers:[],assets:[],tickets:[],estimates:[],invoices:[],services:[],expenses:[],followups:[],income:[]},
-    counters:{customers:1000,assets:1000,tickets:1000,estimates:1000,invoices:1000,services:1000,expenses:1000,followups:1000,income:1000},
+    records:{customers:[],assets:[],tickets:[],estimates:[],invoices:[],services:[],expenses:[],followups:[],income:[],passwords:[]},
+    counters:{customers:1000,assets:1000,tickets:1000,estimates:1000,invoices:1000,services:1000,expenses:1000,followups:1000,income:1000,passwords:1000},
     meta:{updated:0, configUpdated:0, mig:['phone_mobile','fu_invoice','inv_terms','exp_ledger','exp_schedc','inv_scan','exp_invoice']},
     vendorCats:{}, secrets:{anthropicKey:'', t:0},
     settings:{ shopName:'Precision Tech Bench', shopLine:'439 Main Street, Carrollton, KY 41008',
@@ -186,6 +196,7 @@ function fmt(f, v, depth=0){
   switch (f.type){
     case 'relation': { const r = find(f.target, v); return r ? label(f.target, r, depth+1) : '(removed)'; }
     case 'checkbox': return 'Yes';
+    case 'secret': return '••••••••';
     case 'currency': return '$' + Number(v).toFixed(2);
     case 'lineitems': return Array.isArray(v) ? v.map(l => l.d).filter(Boolean).join('; ') : '';
     case 'date': { const [y,m,d] = String(v).split('-'); return y&&m&&d ? `${+m}/${+d}/${y}` : String(v); }
@@ -221,6 +232,8 @@ const STATUS_COLORS = {'New':'var(--focus)','Diagnosing':'var(--warn)','Waiting 
 const pill = v => v ? `<span class="pill" style="--pc:${STATUS_COLORS[v]||'var(--muted)'}">${h(v)}</span>` : '';
 function cell(ent, f, r){
   const v = r.data[f.id];
+  if (f.type === 'secret') return v ? `<span class="meta">••••••••</span> <button type="button" class="btn small" data-act="sec-copy-row" data-ent="${ent}" data-id="${r.id}" data-k="${f.id}" aria-label="Copy password for ${h(label(ent, r))}">Copy</button>` : '';
+  if (ent === 'passwords' && f.id === 'username' && v) return `${h(v)} <button type="button" class="btn small" data-act="sec-copy-row" data-ent="${ent}" data-id="${r.id}" data-k="${f.id}" aria-label="Copy username for ${h(label(ent, r))}">Copy</button>`;
   if (ent==='expenses'){
     if (f.id==='status') return pill(expStatus(r));
     if (f.id==='business') return h(expBiz(r));
@@ -456,7 +469,7 @@ async function lock(note){
   if (!sess) return;
   if (dirty){ await push(); if (dirty) await stashPending(); }
   clearTimeout(pushTimer); clearTimeout(idleTimer);
-  sess = null; db = null; remoteSha = null; dirty = false; lockNote = note || '';
+  sess = null; db = null; remoteSha = null; dirty = false; lockNote = note || ''; ui.revealUntil = 0; ui.reauthThen = null;
   for (const u of pdfUrls.values()) URL.revokeObjectURL(u); pdfUrls.clear(); scan.items = []; scan.biz = '';
   if ($('#dlg').open) $('#dlg').close();
   $('#print').innerHTML = ''; history.replaceState(null, '', location.pathname); route();
@@ -880,6 +893,8 @@ function recalc(form){
   computeTotals(ent, d);
   for (const k of ['subtotal','tax','total','balance']) { const el = form.elements['f_'+k]; if (el && d[k] !== undefined) el.value = d[k].toFixed(2); }
 }
+const secretEdit = f => `<div class="secretbox" data-sec="${f.id}"><input type="password" name="f_${f.id}" id="f_${f.id}" autocomplete="new-password" spellcheck="false"><div class="row">
+  <button type="button" class="btn small" data-act="sec-toggle">Show</button><button type="button" class="btn small" data-act="sec-gen">Generate</button></div></div>`;
 function inputFor(f, v){
   const n = `name="f_${f.id}" id="f_${f.id}"` + (f.calc ? ' readonly tabindex="-1" class="calc"' : '') + (f.id === 'terms' || f.id === 'date_issued' ? ' data-in="terms"' : ''), req = f.required ? 'required' : '';
   const val = v ?? '';
@@ -888,6 +903,10 @@ function inputFor(f, v){
     case 'select': { const opts = [...f.options]; if (val && !opts.includes(val)) opts.push(val);
       return `<select ${n} ${req}><option value="">Choose</option>${opts.map(o => `<option ${o===val?'selected':''}>${h(o)}</option>`).join('')}</select>`; }
     case 'checkbox': return `<input type="checkbox" ${n} ${val?'checked':''}>`;
+    case 'secret': return val   // a saved password is never written into the page until it is shown on request
+      ? `<div class="secretbox" data-sec="${f.id}"><input class="secretmask" type="text" value="••••••••••" readonly tabindex="-1" aria-label="Saved password, hidden"><div class="row">
+          <button type="button" class="btn small" data-act="sec-reveal" data-k="${f.id}">Show</button><button type="button" class="btn small" data-act="sec-copy" data-k="${f.id}">Copy</button><button type="button" class="btn small" data-act="sec-change" data-k="${f.id}">Change</button></div></div>`
+      : secretEdit(f);
     case 'relation': return `<select ${n} ${req} data-in="rel" data-target="${f.target}">${relOptions(f, val)}</select>`;
     case 'number': return `<input type="number" step="any" inputmode="decimal" ${n} ${req} value="${h(val)}">`;
     case 'currency': return `<input type="number" step="0.01" min="0" inputmode="decimal" ${n} ${req} value="${h(val)}">`;
@@ -917,6 +936,7 @@ function expandPrefill(ent, data){
 function fieldRow(f, v){
   if (f.type === 'checkbox') return `<label class="f chk">${inputFor(f, v)}${h(f.label)}</label>`;
   if (f.type === 'lineitems') return `<div class="f wide"><span>${h(f.label)}</span>${inputFor(f, v)}</div>`;
+  if (f.type === 'secret') return `<div class="f"><span>${h(f.label)}</span>${inputFor(f, v)}${f.hint ? `<small>${h(f.hint)}</small>` : ''}</div>`;
   return `<label class="f ${f.type==='textarea'?'wide':''}" for="f_${f.id}"><span>${h(f.label)}${f.required?' <span class="req" aria-label="required">*</span>':''}</span>
     ${inputFor(f, v)}${f.hint ? `<small>${h(f.hint)}</small>` : ''}</label>`;
 }
@@ -947,6 +967,7 @@ function viewRecord(ent, id, prefill={}){
   return `<div class="head"><div class="row" style="gap:.9rem">${r ? `<span class="tag big">${h(tagOf(ent,r))}</span>` : ''}
       <div><h1>${r ? h(label(ent,r)) : 'New ' + h(sc.singular.toLowerCase())}</h1><p><a href="#/list/${ent}">${h(sc.label)}</a></p></div></div>
       <div class="row">${r && (ent==='expenses' || ent==='invoices') && r.pdf ? `<a class="btn" href="#/${ent}/pdf/${r.id}">View PDF</a>` : ''}${r && ent==='expenses' && expStatus(r) === 'Needs Review' ? `<a class="btn primary" href="#/expenses/review/${r.id}">Open in review queue</a>` : ''}${r && ent==='invoices' && r.data.status === 'Needs Review' ? `<a class="btn primary" href="#/invoices/review/${r.id}">Open in review queue</a>` : ''}
+      ${r && ent==='passwords' ? `${/^https?:\/\//i.test(r.data.url || '') ? `<a class="btn" href="${h(r.data.url)}" target="_blank" rel="noopener noreferrer">Open site</a>` : ''}${r.data.username ? `<button class="btn" data-act="sec-copy-row" data-ent="${ent}" data-id="${r.id}" data-k="username">Copy username</button>` : ''}` : ''}
       ${r && ent==='estimates' ? `<button class="btn" data-act="est-to-inv" data-id="${r.id}">Create invoice from this</button>` : ''}
       ${r && ent==='invoices' ? `<button class="btn" data-act="copy-inv" data-id="${r.id}">Copy to new invoice</button>` : ''}
       ${r && ent==='tickets' ? `<button class="btn" data-act="print" data-id="${r.id}">Print work order</button>` : ''}
@@ -992,7 +1013,7 @@ function saveRecord(form){
     if (f.type === 'lineitems'){ const ls = readLines(form, f.id); if (ls.length) data[f.id] = ls; continue; }
     if (f.calc) continue;
     const el = form.elements['f_'+f.id]; if (!el) continue;
-    let v = f.type==='checkbox' ? el.checked : el.value.trim();
+    let v = f.type==='checkbox' ? el.checked : f.type==='secret' ? el.value : el.value.trim();   // never trim a password
     if ((f.type==='number'||f.type==='currency') && v !== '') v = Number(v);
     if (f.required && (v === '' || v === false)) { toast(`${f.label} is required.`); el.focus(); return; }
     if (f.type==='email' && v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { toast('Check the email address format.'); el.focus(); return; }
@@ -1005,6 +1026,12 @@ function saveRecord(form){
     if (fld(ent,'paid_date') && !data.paid_date) data.paid_date = today();
   }
   computeTotals(ent, data);
+  const sfs = sc.fields.filter(f => f.type === 'secret');
+  if (sfs.length){   // a password left alone keeps its saved value; changing one stamps the date
+    const was = id && find(ent, id); let changed = false;
+    for (const f of sfs){ const ov = was?.data[f.id] || ''; if (data[f.id] === undefined && ov) data[f.id] = ov; if ((data[f.id] || '') !== ov) changed = true; }
+    if (fld(ent, 'changed')) { if (changed) data.changed = today(); else if (was?.data.changed) data.changed = was.data.changed; }
+  }
   let r;
   if (ent === 'expenses'){
     const old = id && find(ent, id);
@@ -1178,7 +1205,7 @@ ${[['estimates','estDone','Finished estimate statuses'],['invoices','invDone','F
     <section class="panel"><h2>Security</h2><p>Signed in as <b>${h(sess.u)}</b>. The app locks itself after a period without activity, and refreshing the page also locks it.</p>
       <div class="formgrid"><label class="f">Lock after (minutes)<input type="number" min="5" max="480" data-in="setting" data-k="autoLock" value="${h(S.autoLock || 30)}"></label></div>
       <div class="row" style="margin-top:1rem"><button class="btn" data-act="security">Change password, username, or token</button><button class="btn" data-act="lock">Lock now</button></div></section>
-    <section class="panel"><h2>Export</h2><p>Download a readable copy of everything, or restore one. Treat an exported file like paper records: it isn't encrypted.</p>
+    <section class="panel"><h2>Export</h2><p>Download a readable copy of everything, or restore one. Treat an exported file like paper records: it isn't encrypted. Saved passwords and the scanner key are never included, and restoring a backup keeps the passwords already saved.</p>
       <div class="row"><button class="btn primary" data-act="export-json">Export backup</button>
         <label class="btn">Restore backup<input type="file" accept="application/json,.json" data-in="import" hidden></label>
         ${ENTS.map(e => `<button class="btn" data-act="csv" data-ent="${e}">${h(sch(e).label)} CSV</button>`).join('')}</div></section>
@@ -1187,7 +1214,7 @@ ${[['estimates','estDone','Finished estimate statuses'],['invoices','invDone','F
   </div>`;
 }
 function csvFor(ent, ids){
-  const fs = sch(ent).fields;
+  const fs = sch(ent).fields.filter(f => f.type !== 'secret');   // exports never contain saved passwords
   const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
   const lines = [['No.', ...fs.map(f => f.label), 'Created'].map(q).join(',')];
   for (const r of db.records[ent]) if (!ids || ids.has(r.id)) lines.push([tagOf(ent,r), ...fs.map(f => fmt(f, r.data[f.id])), r.created].map(q).join(','));
@@ -2137,6 +2164,58 @@ function ticketHtml(r){
     <div class="sig"><div>Customer signature</div><div>Date</div><div>Technician</div></div></section>`;
 }
 
+/* ---------- password keeper: reveal and copy need the CRM password again ---------- */
+ui.revealUntil = 0;
+const REVEAL_MIN = 5;
+function requireReauth(then){
+  if (Date.now() < ui.revealUntil) return then();
+  ui.reauthThen = then; const dlg = $('#dlg');
+  dlg.innerHTML = `<form id="reauthform"><h2>Confirm it's you</h2>
+    <div class="formgrid"><p class="meta wide" style="margin:0">Enter your CRM password to show or copy saved passwords. Access stays open for ${REVEAL_MIN} minutes.</p>
+      <label class="f wide">CRM password<input type="password" name="pw" required autocomplete="current-password"></label>
+      <p class="err wide" id="reauth-err" role="alert"></p></div>
+    <div class="formfoot"><button class="btn primary" type="submit">Unlock</button><button class="btn" type="button" data-act="dlg-close">Cancel</button></div></form>`;
+  dlg.showModal(); $('input[name=pw]', dlg).focus();
+}
+async function doReauth(form){
+  const pw = form.elements.pw.value, err = $('#reauth-err'), btn = $('button[type=submit]', form);
+  if (!window.PTB_VAULT || !sess){ err.textContent = 'The password cannot be checked right now.'; return; }
+  btn.disabled = true; btn.textContent = 'Checking…'; err.textContent = '';
+  try { await openVault(window.PTB_VAULT, sess.u, pw); }
+  catch(e){ btn.disabled = false; btn.textContent = 'Unlock'; err.textContent = 'That is not the right password.'; form.elements.pw.select(); return; }
+  ui.revealUntil = Date.now() + REVEAL_MIN * 60000;
+  const fn = ui.reauthThen; ui.reauthThen = null; $('#dlg').close(); if (fn) fn();
+}
+function copyText(value, what){
+  navigator.clipboard.writeText(value).then(() => {
+    toast(`${what} copied. The clipboard is cleared in 30 seconds.`);
+    clearTimeout(ui.clipT); ui.clipT = setTimeout(() => navigator.clipboard.writeText('').catch(() => {}), 30000);
+  }).catch(() => toast('Could not copy. Your browser blocked clipboard access.'));
+}
+function genPassword(n = 20){
+  const sets = ['ABCDEFGHJKLMNPQRSTUVWXYZ','abcdefghijkmnopqrstuvwxyz','23456789','!@#$%^&*-_=+?'], all = sets.join('');
+  const rnd = m => { const a = new Uint32Array(1), lim = Math.floor(2 ** 32 / m) * m; do crypto.getRandomValues(a); while (a[0] >= lim); return a[0] % m; };
+  const out = sets.map(s => s[rnd(s.length)]); while (out.length < n) out.push(all[rnd(all.length)]);
+  for (let i = out.length - 1; i > 0; i--){ const j = rnd(i + 1); [out[i], out[j]] = [out[j], out[i]]; }
+  return out.join('');
+}
+const savedSecret = (form, k) => find(form.dataset.ent, form.dataset.id)?.data[k] || '';
+// Backups leave saved passwords out; restoring one keeps the passwords already stored.
+function withoutPasswords(d){
+  const records = {...d.records};
+  for (const e of ENTS){
+    const sf = (d.schema[e]?.fields || []).filter(f => f.type === 'secret');
+    if (sf.length && records[e]) records[e] = records[e].map(r => { const data = {...r.data}; sf.forEach(f => delete data[f.id]); return {...r, data}; });
+  }
+  return {...d, records};
+}
+function keepPasswords(d){
+  for (const e of ENTS){
+    const sf = (db.schema[e]?.fields || []).filter(f => f.type === 'secret');
+    for (const r of d.records[e] || []){ const cur = find(e, r.id); if (cur) for (const f of sf) if (cur.data[f.id] && !r.data[f.id]) r.data[f.id] = cur.data[f.id]; }
+  }
+}
+
 /* ---------- events ---------- */
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-act]');
@@ -2150,6 +2229,15 @@ document.addEventListener('click', e => {
   else if (act === 'print-doc') printDoc(ent, t.dataset.id);
   else if (act === 'email-doc') emailDoc(ent, t.dataset.id);
   else if (act === 'print-prices') printPrices();
+  else if (act === 'sec-reveal'){ const form = t.closest('form'), m = $('.secretmask', t.closest('.secretbox'));
+    if (t.dataset.shown){ m.value = '••••••••••'; delete t.dataset.shown; t.textContent = 'Show'; clearTimeout(t._h); }
+    else requireReauth(() => { m.value = savedSecret(form, t.dataset.k); t.dataset.shown = '1'; t.textContent = 'Hide'; clearTimeout(t._h); t._h = setTimeout(() => { if (t.isConnected && t.dataset.shown) t.click(); }, 30000); }); }
+  else if (act === 'sec-copy') requireReauth(() => copyText(savedSecret(t.closest('form'), t.dataset.k), 'Password'));
+  else if (act === 'sec-copy-row'){ const r = find(ent, t.dataset.id), f = fld(ent, t.dataset.k); if (!r || !f) return;
+    const go = () => copyText(r.data[f.id] || '', f.type === 'secret' ? 'Password' : 'Username'); f.type === 'secret' ? requireReauth(go) : go(); }
+  else if (act === 'sec-change'){ const box = t.closest('.secretbox'), f = fld(t.closest('form').dataset.ent, t.dataset.k); box.outerHTML = secretEdit(f); $('#f_' + f.id)?.focus(); }
+  else if (act === 'sec-toggle'){ const i = $('input', t.closest('.secretbox')); i.type = i.type === 'password' ? 'text' : 'password'; t.textContent = i.type === 'password' ? 'Show' : 'Hide'; }
+  else if (act === 'sec-gen'){ const box = t.closest('.secretbox'), i = $('input', box); i.value = genPassword(20); i.type = 'text'; $('[data-act=sec-toggle]', box).textContent = 'Hide'; i.focus(); toast('New password generated. Save to keep it.'); }
   else if (act === 'batch-status') batchStatusDialog(ent);
   else if (act === 'batch-print') batchPrint(ent);
   else if (act === 'batch-csv'){ const n = selRecs(ent).length; if (n) download(`${ent}-selected-${today()}.csv`, csvFor(ent, selSet(ent)), 'text/csv'); }
@@ -2187,7 +2275,7 @@ document.addEventListener('click', e => {
       fs.splice(+t.dataset.i, 1); db.records[ent].forEach(r => delete r.data[f.id]); save(); route(); toast('Field deleted'); } }
   else if (act === 'dlg-close') $('#dlg').close();
   else if (act === 'sync') syncLeads(t);
-  else if (act === 'export-json'){ db.settings.lastBackup = new Date().toISOString(); save(); download(`bench-crm-backup-${today()}.json`, JSON.stringify({...db, secrets:undefined}, null, 1), 'application/json'); toast('Backup exported'); if (!parseHash().parts[0]) route(); }
+  else if (act === 'export-json'){ db.settings.lastBackup = new Date().toISOString(); save(); download(`bench-crm-backup-${today()}.json`, JSON.stringify(withoutPasswords({...db, secrets:undefined}), null, 1), 'application/json'); toast('Backup exported. Saved passwords are not included.'); if (!parseHash().parts[0]) route(); }
   else if (act === 'csv') download(`${ent}-${today()}.csv`, csvFor(ent), 'text/csv');
   else if (act === 'sample') sample();
   else if (act === 'wipe'){ if (confirm('Erase every record and reset all fields? This also erases them from GitHub (earlier versions stay in the repository history).') && confirm('Erase everything?')){
@@ -2278,7 +2366,7 @@ document.addEventListener('change', e => {
           if (!d.schema || !d.records) throw new Error();
           if (!confirm('Replace all records and fields with this backup? The current version stays in GitHub history.')) return;
           const f = freshDb(); for (const x of ['schema','records','counters','settings']) d[x] = {...f[x], ...d[x]};
-          replaceDb(d); toast('Backup restored'); location.hash = '#/'; route();
+          keepPasswords(d); replaceDb(d); toast('Backup restored'); location.hash = '#/'; route();
         } catch(err){ toast('That file is not a Bench CRM backup.'); } };
       rd.readAsText(file); break; }
   }
@@ -2287,6 +2375,7 @@ document.addEventListener('submit', e => {
   if (e.target.id === 'recform'){ e.preventDefault(); saveRecord(e.target); }
   else if (e.target.id === 'revform'){ e.preventDefault(); e.target.dataset.ent === 'invoices' ? invReviewSave(e.target, true) : reviewSave(e.target, true); }
   else if (e.target.id === 'batchform'){ e.preventDefault(); applyBatchStatus(e.target); }
+  else if (e.target.id === 'reauthform'){ e.preventDefault(); doReauth(e.target); }
   else if (e.target.id === 'fldform'){ e.preventDefault(); saveField(e.target); }
   else if (e.target.id === 'loginform'){ e.preventDefault(); doLogin(e.target); }
   else if (e.target.id === 'setupform'){ e.preventDefault(); doSetup(e.target); }
